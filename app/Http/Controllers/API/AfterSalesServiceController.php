@@ -1,0 +1,315 @@
+<?php
+
+namespace App\Http\Controllers\API;
+
+use App\Http\Controllers\API\Contracts\ApiController;
+use App\Http\Controllers\Controller;
+use App\Models\AfterSalesService;
+use App\Models\Customer;
+use App\Models\InstallerAppointment;
+use App\Models\Rating;
+use App\Models\Sms;
+use App\Models\SourceSms;
+use Carbon\Carbon;
+use Hekmatinasser\Verta\Verta;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use App\Services\InstallerSlotService;
+
+
+class AfterSalesServiceController extends Controller
+{
+    private ApiController $apiController;
+    private InstallerSlotService $slotService;
+
+
+    public function __construct(ApiController $apiController, InstallerSlotService $slotService)
+    {
+        $this->apiController = $apiController;
+        $this->slotService = $slotService;
+    }
+
+    public function list()
+    {
+        $list = AfterSalesService::query()
+            ->with(['customer', 'installationService', 'serviceType', 'responsibleUser'])
+            ->orderByDesc('created_at')
+            ->orderBy('follow_up_date')
+            ->get();
+
+        return $this->apiController->respondData($list);
+    }
+
+    public function customerHistory($customerId)
+    {
+        Customer::findOrFail($customerId);
+
+        $history = AfterSalesService::where('customer_id', $customerId)
+            ->with(['serviceType', 'responsibleUser', 'installationService'])
+            ->orderByDesc('created_at')
+            ->get();
+
+        $data = $history->map(function (AfterSalesService $service) {
+            return [
+                'id' => $service->id,
+                'problem' => $service->problem,
+                'status' => $service->status,
+                'status_label' => $service->status_label,
+                'source' => $service->source,
+                'source_label' => $service->source_label,
+                'service_type' => $service->serviceType,
+                'responsible_user' => $service->responsibleUser,
+                'request_date' => $service->request_date,
+                'jalali_request_date' => $service->jalali_request_date,
+                'follow_up_date' => $service->follow_up_date,
+                'jalali_follow_up_date' => $service->jalali_follow_up_date,
+                'jalali_date' => $service->jalali_date,
+                'installation_service_id' => $service->installation_service_id,
+                'resolution_description' => $service->resolution_description,
+            ];
+        });
+
+        return $this->apiController->respondData($data->values());
+    }
+
+    public function store(Request $request)
+    {
+        $this->validatePayload($request);
+
+        try {
+            $service = DB::transaction(function () use ($request) {
+                $attributes = $this->extractServiceAttributes($request);
+                $attributes['status'] = AfterSalesService::STATUS_PENDING;
+                $attributes['source'] = AfterSalesService::SOURCE_MANUAL;
+
+                $service = AfterSalesService::create($attributes);
+                $this->syncInstaller($service, $request);
+                return $service;
+            });
+        } catch (\Exception $e) {
+            return $this->apiController->respondError($e->getMessage());
+        }
+
+        return $this->apiController->respondCreated(
+            'با موفقیت ثبت شد',
+            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser', 'installerAppointments.installer'])
+        );
+    }
+
+    public function update(Request $request, $id)
+    {
+        $service = AfterSalesService::findOrFail($id);
+        $this->validatePayload($request);
+
+        try {
+            DB::transaction(function () use ($request, $service) {
+                $service->update($this->extractServiceAttributes($request));
+                $this->syncInstaller($service, $request);
+            });
+        } catch (\Exception $e) {
+            return $this->apiController->respondError($e->getMessage());
+        }
+
+        return $this->apiController->respondUpdated(
+            'با موفقیت ویرایش شد',
+            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser', 'installerAppointments.installer'])
+        );
+    }
+
+    public function complete(Request $request, $id)
+    {
+        $service = AfterSalesService::findOrFail($id);
+
+        $this->validate($request, [
+            'resolution_description' => 'required|string',
+        ], [
+            'resolution_description.required' => 'توضیحات نتیجه پیگیری را وارد کنید',
+        ]);
+
+        if ($service->status === AfterSalesService::STATUS_COMPLETED) {
+            return $this->apiController->respondError('این خدمت پس از فروش قبلاً تکمیل شده است');
+        }
+
+        DB::transaction(function () use ($request, $service) {
+            $service->update([
+                'status' => AfterSalesService::STATUS_COMPLETED,
+                'resolution_description' => $request->input('resolution_description'),
+                'completed_at' => now(),
+            ]);
+
+            $service->installerAppointments()->where('status', InstallerAppointment::RESERVED)
+                ->update(['status' => InstallerAppointment::DONE]);
+        });
+
+        if ($request->input("send_sms"))
+            return $this->Sms($service);
+
+        return $this->apiController->respondUpdated(
+            "با موفقیت ویرایش شد",
+            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser', 'installerAppointments.installer'])
+        );
+    }
+
+    public function show($id)
+    {
+        $service = AfterSalesService::with([
+            'customer', 'installationService', 'serviceType', 'responsibleUser',
+            'installerAppointments.installer'
+        ])->findOrFail($id);
+
+        return $this->apiController->respondData($service);
+    }
+
+    public function destroy($id)
+    {
+        $service = AfterSalesService::findOrFail($id);
+        DB::transaction(function () use ($service) {
+            $service->installerAppointments()->update(['status' => InstallerAppointment::CANCELED]);
+            $service->delete();
+        });
+        return $this->apiController->respondDeleted();
+    }
+
+    /**
+     * ثبت/به‌روزرسانی/لغو نوبت نصاب مرتبط با یک خدمت پس از فروش.
+     * ساعت شروع و پایان همیشه توسط خود کاربر در فرم انتخاب می‌شود؛
+     * اینجا هیچ مقدار پیش‌فرضی (مثلاً +۶۰ دقیقه) اضافه نمی‌کنیم.
+     */
+    private function syncInstaller(AfterSalesService $service, Request $request): void
+    {
+        $existing = InstallerAppointment::where('after_sale_service_id', $service->id)->first();
+
+        $installerId = $request->input('installer_id');
+        $date = $request->input('installer_date');
+        $startTime = $request->input('installer_start_time');
+        $endTime = $request->input('installer_end_time');
+
+        if (empty($installerId) || empty($date) || empty($startTime) || empty($endTime)) {
+            if ($existing) {
+                $existing->update(['status' => InstallerAppointment::CANCELED]);
+            }
+            return;
+        }
+
+        $carbonDate = Verta::parse($date)->toCarbon();
+
+        $this->slotService->assertSlotIsAvailable(
+            $installerId,
+            $carbonDate,
+            $startTime,
+            $endTime,
+            $existing?->id
+        );
+
+        InstallerAppointment::updateOrCreate(
+            ['after_sale_service_id' => $service->id],
+            [
+                'user_id' => $installerId,
+                'customer_id' => $service->customer_id,
+                'automation_id' => null,
+                'installation_service_id' => null,
+                'after_sale_service_id' => $service->id,
+                // باگ قبلی: همیشه TYPE_PANEL ثبت می‌شد و در تقویم کاری به عنوان
+                // «نصب پنل» نمایش داده می‌شد، نه «خدمات پس از فروش».
+                'type' => InstallerAppointment::TYPE_AFTER_SALE,
+                'date' => $carbonDate->format('Y-m-d'),
+                'start_time' => $startTime,
+                'end_time' => $endTime,
+                'status' => InstallerAppointment::RESERVED,
+            ]
+        );
+    }
+
+    private function validatePayload(Request $request): void
+    {
+        $this->validate($request, [
+            'customer_id' => 'required|exists:customers,id',
+            'installation_service_id' => 'nullable|exists:installation_services,id',
+            'problem' => 'required|string',
+            'service_type_id' => 'required|exists:service_types,id',
+            'responsible_user_id' => 'required|exists:users,id',
+            'request_date' => 'nullable',
+            'follow_up_date' => 'nullable',
+            'installer_id' => 'nullable|exists:users,id',
+            'installer_date' => 'nullable|date',
+            'installer_start_time' => 'nullable|date_format:H:i|required_with:installer_id',
+            'installer_end_time' => 'nullable|date_format:H:i|after:installer_start_time|required_with:installer_id',
+        ], [
+            'customer_id.required' => 'مشتری را انتخاب کنید',
+            'problem.required' => 'مشکل را وارد کنید',
+            'service_type_id.required' => 'نوع خدمت را انتخاب کنید',
+            'responsible_user_id.required' => 'مسئول این خدمت را انتخاب کنید',
+            'installer_start_time.required_with' => 'ساعت شروع نصب را وارد کنید',
+            'installer_end_time.required_with' => 'ساعت پایان نصب را وارد کنید',
+            'installer_end_time.after' => 'ساعت پایان باید بعد از ساعت شروع باشد',
+        ]);
+    }
+
+    private function extractServiceAttributes(Request $request): array
+    {
+        return [
+            'customer_id' => $request->input('customer_id'),
+            'installation_service_id' => $request->input('installation_service_id'),
+            'problem' => $request->input('problem'),
+            'service_type_id' => $request->input('service_type_id'),
+            'responsible_user_id' => $request->input('responsible_user_id'),
+            'request_date' => $request->filled('request_date')
+                ? Verta::parse($request->input('request_date'))->datetime()->format('Y-m-d')
+                : now()->format('Y-m-d'),
+            'follow_up_date' => $request->filled('follow_up_date')
+                ? Verta::parse($request->input('follow_up_date'))->datetime()->format('Y-m-d')
+                : null,
+        ];
+    }
+
+    public function Sms(AfterSalesService $service)
+    {
+        $smsTotalCount = 0;
+        $mobilesArray = [];
+
+        $sms = SourceSms::where('title', 'نظرسنجی')->first();
+
+        if (!$sms)
+            return $this->apiController->respondError("قالب sms برای 'نظرسنجی' ثبت نشده است.");
+
+        $new_rating = Rating::getOrCreateFor($service);
+
+        $customer = $service->customer;
+        $mobile = $customer->contact_number;
+        $name = $customer->name;
+        $content = '';
+        if ($customer->type == 0) {
+            $content = 'آقای ';
+        } elseif ($customer->type == 1) {
+            $content = 'خانم ';
+        }
+        $content .= $name;
+        $content .= "\n";
+        $content .= "\n";
+        $content .= $sms->description;
+        $content .= "\n";
+        $content .= "لینک صفحه نظرسنجی : ";
+        $content .= "https://ivazcrm.ir/survey/" . $new_rating->token;
+
+        $urlSMS = "https://RayganSMS.com/SendMessageWithUrl.ashx?Username=" . urlencode(env('TREZ_USERNAME')) . "&Password=" . urlencode(env('TREZ_PASSWORD')) . "&PhoneNumber=" . urlencode(env('TREZ_NUMBER')) . "&MessageBody=" . urlencode($content) . "&RecNumber=" . urlencode($mobile) . "&Smsclass=1";
+        if (file_get_contents($urlSMS)) {
+            $mobilesArray[] = $mobile;
+            $smsTotalCount++;
+        }
+
+        $create = Sms::create([
+            'receivers' => $mobilesArray,
+            'count' => $smsTotalCount,
+            'body' => $content,
+            'sent_at' => Carbon::now(),
+            'customer_id' => $customer->id,
+            'user_id' => auth()->id()
+        ]);
+
+        if ($create) {
+            return $this->apiController->respondCreated('با موفقیت ویرایش و پیامک ارسال شد');
+        } else {
+            return $this->apiController->respondInternalError();
+        }
+    }
+}
