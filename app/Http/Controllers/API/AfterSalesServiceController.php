@@ -6,7 +6,6 @@ use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\Controller;
 use App\Models\AfterSalesService;
 use App\Models\Customer;
-use App\Models\InstallerAppointment;
 use App\Models\Rating;
 use App\Models\Sms;
 use App\Models\SourceSms;
@@ -14,19 +13,16 @@ use Carbon\Carbon;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Services\InstallerSlotService;
 
 
 class AfterSalesServiceController extends Controller
 {
     private ApiController $apiController;
-    private InstallerSlotService $slotService;
 
 
-    public function __construct(ApiController $apiController, InstallerSlotService $slotService)
+    public function __construct(ApiController $apiController)
     {
         $this->apiController = $apiController;
-        $this->slotService = $slotService;
     }
 
     public function list()
@@ -112,7 +108,7 @@ class AfterSalesServiceController extends Controller
 
         return $this->apiController->respondUpdated(
             'با موفقیت ویرایش شد',
-            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser', 'installerAppointments.installer'])
+            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser'])
         );
     }
 
@@ -136,9 +132,6 @@ class AfterSalesServiceController extends Controller
                 'resolution_description' => $request->input('resolution_description'),
                 'completed_at' => now(),
             ]);
-
-            $service->installerAppointments()->where('status', InstallerAppointment::RESERVED)
-                ->update(['status' => InstallerAppointment::DONE]);
         });
 
         if ($request->input("send_sms"))
@@ -146,15 +139,14 @@ class AfterSalesServiceController extends Controller
 
         return $this->apiController->respondUpdated(
             "با موفقیت ویرایش شد",
-            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser', 'installerAppointments.installer'])
+            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser'])
         );
     }
 
     public function show($id)
     {
         $service = AfterSalesService::with([
-            'customer', 'installationService', 'serviceType', 'responsibleUser',
-            'installerAppointments.installer'
+            'customer', 'installationService', 'serviceType', 'responsibleUser'
         ])->findOrFail($id);
 
         return $this->apiController->respondData($service);
@@ -164,60 +156,9 @@ class AfterSalesServiceController extends Controller
     {
         $service = AfterSalesService::findOrFail($id);
         DB::transaction(function () use ($service) {
-            $service->installerAppointments()->update(['status' => InstallerAppointment::CANCELED]);
             $service->delete();
         });
         return $this->apiController->respondDeleted();
-    }
-
-    /**
-     * ثبت/به‌روزرسانی/لغو نوبت نصاب مرتبط با یک خدمت پس از فروش.
-     * ساعت شروع و پایان همیشه توسط خود کاربر در فرم انتخاب می‌شود؛
-     * اینجا هیچ مقدار پیش‌فرضی (مثلاً +۶۰ دقیقه) اضافه نمی‌کنیم.
-     */
-    private function syncInstaller(AfterSalesService $service, Request $request): void
-    {
-        $existing = InstallerAppointment::where('after_sale_service_id', $service->id)->first();
-
-        $installerId = $request->input('installer_id');
-        $date = $request->input('installer_date');
-        $startTime = $request->input('installer_start_time');
-        $endTime = $request->input('installer_end_time');
-
-        if (empty($installerId) || empty($date) || empty($startTime) || empty($endTime)) {
-            if ($existing) {
-                $existing->update(['status' => InstallerAppointment::CANCELED]);
-            }
-            return;
-        }
-
-        $carbonDate = Verta::parse($date)->toCarbon();
-
-        $this->slotService->assertSlotIsAvailable(
-            $installerId,
-            $carbonDate,
-            $startTime,
-            $endTime,
-            $existing?->id
-        );
-
-        InstallerAppointment::updateOrCreate(
-            ['after_sale_service_id' => $service->id],
-            [
-                'user_id' => $installerId,
-                'customer_id' => $service->customer_id,
-                'automation_id' => null,
-                'installation_service_id' => null,
-                'after_sale_service_id' => $service->id,
-                // باگ قبلی: همیشه TYPE_PANEL ثبت می‌شد و در تقویم کاری به عنوان
-                // «نصب پنل» نمایش داده می‌شد، نه «خدمات پس از فروش».
-                'type' => InstallerAppointment::TYPE_AFTER_SALE,
-                'date' => $carbonDate->format('Y-m-d'),
-                'start_time' => $startTime,
-                'end_time' => $endTime,
-                'status' => InstallerAppointment::RESERVED,
-            ]
-        );
     }
 
     private function validatePayload(Request $request): void
@@ -231,17 +172,11 @@ class AfterSalesServiceController extends Controller
             'request_date' => 'nullable',
             'follow_up_date' => 'nullable',
             'installer_id' => 'nullable|exists:users,id',
-            'installer_date' => 'nullable|date',
-            'installer_start_time' => 'nullable|date_format:H:i|required_with:installer_id',
-            'installer_end_time' => 'nullable|date_format:H:i|after:installer_start_time|required_with:installer_id',
         ], [
             'customer_id.required' => 'مشتری را انتخاب کنید',
             'problem.required' => 'مشکل را وارد کنید',
             'service_type_id.required' => 'نوع خدمت را انتخاب کنید',
             'responsible_user_id.required' => 'مسئول این خدمت را انتخاب کنید',
-            'installer_start_time.required_with' => 'ساعت شروع نصب را وارد کنید',
-            'installer_end_time.required_with' => 'ساعت پایان نصب را وارد کنید',
-            'installer_end_time.after' => 'ساعت پایان باید بعد از ساعت شروع باشد',
         ]);
     }
 
@@ -289,7 +224,7 @@ class AfterSalesServiceController extends Controller
         $content .= $sms->description;
         $content .= "\n";
         $content .= "لینک صفحه نظرسنجی : ";
-        $content .= "https://ivazcrm.ir/survey/" . $new_rating->token;
+        $content .= "https://khrshdyar.ir/survey/" . $new_rating->token;
 
         $urlSMS = "https://RayganSMS.com/SendMessageWithUrl.ashx?Username=" . urlencode(env('TREZ_USERNAME')) . "&Password=" . urlencode(env('TREZ_PASSWORD')) . "&PhoneNumber=" . urlencode(env('TREZ_NUMBER')) . "&MessageBody=" . urlencode($content) . "&RecNumber=" . urlencode($mobile) . "&Smsclass=1";
         if (file_get_contents($urlSMS)) {

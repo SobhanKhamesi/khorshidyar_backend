@@ -48,10 +48,10 @@
     <div class="card-header" style="border: 1px solid blue;border-radius: 0.7rem">
         <div class="row text-center" style="align-items: center;">
             <div class="col text-center" id="title">
-                انرژی پایدار ایواز
+                شرکت خورشیدیار
             </div>
             <div class="col">
-                <img src="{{ asset("assets/picture/logo-ivaz.png") }}" alt="logo-ivaz" style="max-width: 7rem">
+{{--                <img src="{{ asset("assets/picture/logo-ivaz.png") }}" alt="logo-ivaz" style="max-width: 7rem">--}}
             </div>
         </div>
     </div>

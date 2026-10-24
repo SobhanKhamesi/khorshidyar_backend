@@ -45,17 +45,8 @@ class InstallerAppointment extends Model
         'date' => 'date:Y-m-d',
     ];
 
-    // باگ رفع شده: "jalali_date" در List.vue و صفحه‌ی ادیت سرویس نصب استفاده
-    // می‌شود، اما تا پیش از این هیچ accessor/append‌ای برای آن تعریف نشده بود
-    // و فقط تاریخ میلادی (date) در دسترس بود. بدون این فیلد، فرانت‌اند راهی
-    // برای تبدیل تاریخ میلادی به جلالی نداشت (این تبدیل همیشه توسط Verta در
-    // بک‌اند انجام می‌شود). این accessor دقیقاً هم‌الگو با
-    // InstallationService::getJalaliSurveyDateAttribute() اضافه شد.
     protected $appends = ['jalali_date'];
 
-    // نصاب و مشتری همیشه برای نمایش نوبت‌ها لازم هستند؛ قبلاً «customer» اصلاً
-    // eager-load نمی‌شد و رابطه‌اش هم تعریف نشده بود، به همین دلیل نام/آدرس
-    // مشتری همیشه خالی نمایش داده می‌شد.
     protected $with = ['installer', 'customer'];
 
     public static function typeLabels(): array

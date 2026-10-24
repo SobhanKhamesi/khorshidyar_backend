@@ -91,10 +91,6 @@ class AfterSalesService extends Model
         return $this->belongsTo(User::class, 'responsible_user_id');
     }
 
-    public function installerAppointments()
-    {
-        return $this->hasMany(InstallerAppointment::class, 'after_sale_service_id');
-    }
 
     public function scopePending($query)
     {

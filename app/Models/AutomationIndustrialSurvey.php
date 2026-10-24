@@ -17,7 +17,7 @@ class AutomationIndustrialSurvey extends Model
     protected $table = 'automation_industrial_surveys';
 
     protected $fillable = [
-        'automation_id','goals','meter_type',
+        'automation_id','goals','meter_type','meter_amp','bill_id',
         'branch_capacity','has_dedicated_transformer',
         'outage_per_week','outage_hours_each','outage_time',
         'outage_effects','required_photos','must_stay_on_equipment',

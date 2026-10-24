@@ -8,7 +8,6 @@ use App\Http\Controllers\API\BankAccountsController;
 use App\Http\Controllers\API\FailureCategoriesController;
 use App\Http\Controllers\API\InstallationServiceController;
 use App\Http\Controllers\API\InstallerAppointmentController;
-use App\Http\Controllers\API\InstallerWorkingDayController;
 use App\Http\Controllers\API\InventoryController;
 use App\Http\Controllers\API\OpportunitiesController;
 use App\Http\Controllers\API\ProductCategoryController;
@@ -286,22 +285,6 @@ Route::middleware('auth:sanctum')->group(callback: function () {
         Route::get('customer-history/{customerId}', [AfterSalesServiceController::class, 'customerHistory']);
         Route::post('store', [AfterSalesServiceController::class, 'store']);
         Route::put('complete/{id}', [AfterSalesServiceController::class, 'complete']);
-    });
-
-// ---- نوبت‌های نصاب (از قبل موجود بود؛ فقط برای یادآوری آورده شده) ----
-    Route::prefix('installer-appointments')->group(function () {
-        Route::get('installer/{installerId}', [InstallerAppointmentController::class, 'forInstaller']);
-        Route::get('forAll', [InstallerAppointmentController::class, 'forAll']);
-        Route::get('available-slots/{installerId}', [InstallerAppointmentController::class, 'availableSlots']);
-        Route::post('store', [InstallerAppointmentController::class, 'store']);
-        Route::put('{id}', [InstallerAppointmentController::class, 'update']);
-        Route::delete('{id}', [InstallerAppointmentController::class, 'destroy']);
-    });
-
-// ---- روزهای کاری نصاب (از قبل موجود بود) ----
-    Route::prefix('installer-working-days')->group(function () {
-        Route::get('{installerId}', [InstallerWorkingDayController::class, 'index']);
-        Route::post('{installerId}', [InstallerWorkingDayController::class, 'store']);
     });
 
     Route::group(['prefix' => 'charts'], function () {

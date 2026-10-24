@@ -10,7 +10,6 @@ use App\Models\Automation;
 use App\Models\Check;
 use App\Models\Customer;
 use App\Models\InstallationService;
-use App\Models\InstallerAppointment;
 use App\Models\Reminder;
 use Carbon\Carbon;
 
@@ -67,14 +66,7 @@ class MainController extends Controller
             ->whereIn("status", [AfterSalesService::STATUS_PENDING, AfterSalesService::STATUS_IN_PROGRESS])->count();
 
         $installation_service_count = InstallationService::query()
-            ->whereHas('installerAppointments', function ($query) {
-                $query->whereIn('date', [
-                    Carbon::today()->toDateString(),
-                    Carbon::tomorrow()->toDateString(),
-                ])
-                    ->where('status', '!=', InstallerAppointment::CANCELED);
-            })
-            ->count();
+            ->count(); // todo
 
         $data = [
             'darkhast_count' => $darkhastCount,

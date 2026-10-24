@@ -18,8 +18,11 @@ class AutomationHomeSurvey extends Model
 
     protected $fillable = [
         'automation_id','goals','meter_single_selected',
-        'meter_single_count','meter_three_selected',
-        'meter_three_count','install_location_note','has_internal_panel',
+        'meter_single_count','meter_single_amp','meter_three_selected',
+        'meter_three_count','meter_three_amp',
+        'meter_demand_selected','meter_demand_count','meter_demand_amp',
+        'bill_id','install_location_type','install_location_distance',
+        'needs_extra_infrastructure','extra_infrastructure_note','has_internal_panel',
         'connection_point','cable_length','panel_location_note',
         'panel_photo','consumer_fridge_selected','consumer_fridge_count',
         'consumer_lighting_selected','consumer_lighting_watt','consumer_tv_selected',
@@ -36,6 +39,8 @@ class AutomationHomeSurvey extends Model
         'outage_items' => 'array',
         'meter_single_selected' => 'boolean',
         'meter_three_selected' => 'boolean',
+        'meter_demand_selected' => 'boolean',
+        'needs_extra_infrastructure' => 'boolean',
         'has_internal_panel' => 'boolean',
         'consumer_fridge_selected' => 'boolean',
         'consumer_lighting_selected' => 'boolean',

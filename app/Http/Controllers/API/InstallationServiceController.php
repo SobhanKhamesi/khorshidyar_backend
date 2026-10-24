@@ -9,7 +9,6 @@ use App\Models\Customer;
 use App\Models\InstallationService;
 use App\Models\InstallationServiceItem;
 use App\Models\InstallerAppointment;
-use App\Services\InstallerSlotService;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,12 +17,10 @@ use Illuminate\Validation\Rule;
 class InstallationServiceController extends Controller
 {
     private ApiController $apiController;
-    private InstallerSlotService $slotService;
 
-    public function __construct(ApiController $apiController, InstallerSlotService $slotService)
+    public function __construct(ApiController $apiController)
     {
         $this->apiController = $apiController;
-        $this->slotService = $slotService;
     }
 
     public function list()
@@ -218,18 +215,6 @@ class InstallationServiceController extends Controller
             $date = Verta::parse($item['date'])->toCarbon();
             $startTime = $item['start_time'];
             $endTime = $item['end_time'];
-
-            // نکته‌ی مهم: installer_id شناسه‌ای از نوع UUID است. تبدیل آن به
-            // (int) باعث می‌شد شناسه به یک عدد اشتباه بریده شود و در نتیجه هیچ
-            // روز کاری/تداخلی درست تشخیص داده نمی‌شد. اینجا همان مقدار رشته‌ای
-            // اصلی پاس داده می‌شود.
-            $this->slotService->assertSlotIsAvailable(
-                $item['installer_id'],
-                $date,
-                $startTime,
-                $endTime,
-                $existing?->id
-            );
 
             InstallerAppointment::updateOrCreate(
                 ['installation_service_id' => $service->id, 'type' => $typeValue],
