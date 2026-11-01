@@ -51,7 +51,7 @@ class Automation extends Model
         'survey_type' ,  // نوع بازدید
         'description' ,
     ];
-    public $with = ['customer', 'orders', 'expert', 'failure', 'comments', 'contractItems', 'payments', 'cheques', 'user', 'intakeForm'];
+    public $with = ['customer', 'orders', 'expert', 'failure', 'comments', 'contractItems', 'payments', 'cheques', 'user', 'intakeForm', 'contract'];
     public $appends = ['jalali_date', 'jalali_visit_date', 'sabtKonande', 'referrer_income'];
 
     protected $casts = [
@@ -71,6 +71,11 @@ class Automation extends Model
     public function homeSurvey()  // فرم بازدید خانگی
     {
         return $this->hasOne(AutomationHomeSurvey::class, 'automation_id');
+    }
+
+    public function contract() // قرارداد (مرحله مذاکره و قرارداد)
+    {
+        return $this->hasOne(AutomationContract::class, 'automation_id');
     }
 
     public function customerSurvey() // فرم بازدید ثبت شده از مشتری

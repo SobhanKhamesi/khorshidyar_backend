@@ -256,6 +256,7 @@ class Customer extends Model
                 AutomationPayment::whereIn('automation_id', $automationIds)->delete();
                 AutomationCheque::whereIn('automation_id', $automationIds)->delete();
                 AutomationCustomerSurvey::whereIn('automation_id', $automationIds)->delete();
+                AutomationContract::whereIn('automation_id', $automationIds)->delete();
 
                 $homeSurveyIds = AutomationHomeSurvey::whereIn('automation_id', $automationIds)->pluck('id');
                 AutomationHomeGasCooler::whereIn('home_survey_id', $homeSurveyIds)->delete();

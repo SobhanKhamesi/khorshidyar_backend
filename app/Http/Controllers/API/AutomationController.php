@@ -94,12 +94,10 @@ class AutomationController extends Controller
 
     public function confirmContract(Request $request)
     {
-        $this->validate($request, [
+        $this->validate($request, array_merge([
             'id' => 'required',
             'contract_items' => 'nullable|array',
-            'payments' => 'nullable|array',
-            'cheques' => 'nullable|array',
-        ]);
+        ], self::FINAL_PRICE_RULE, self::PAYMENT_RULES), self::FINAL_PRICE_MESSAGES);
 
         $automation = Automation::findOrFail($request->input('id'));
         $nextStatus = $automation->status + 1;
@@ -113,29 +111,100 @@ class AutomationController extends Controller
                 ]);
             }
 
-            $automation->payments()->delete();
-            foreach ($request->input('payments', []) as $payment) {
-                $automation->payments()->create([
-                    'method' => $payment['method'],
-                    'amount' => $payment['amount'],
-                    'date' => isset($payment['date']) ? Verta::parse($payment['date'])->datetime() : null,
-                ]);
-            }
+            $this->savePaymentsAndCheques($automation, $request->input('payments', []), $request->input('cheques', []));
 
-            $automation->cheques()->delete();
-            foreach ($request->input('cheques', []) as $cheque) {
-                $automation->cheques()->create([
-                    'number' => $cheque['number'],
-                    'bank_name' => $cheque['bank_name'] ?? null,
-                    'amount' => $cheque['amount'],
-                    'due_date' => isset($cheque['due_date']) ? Verta::parse($cheque['due_date'])->datetime() : null,
-                ]);
-            }
-
-            $automation->update(['status' => $nextStatus]);
+            // مبلغ کل قرارداد به‌صورت دستی وارد می‌شود
+            $automation->update(['status' => $nextStatus, 'final_price' => $request->input('final_price')]);
         });
 
         return $this->apiController->respondCreated();
+    }
+
+    // مبلغ نهایی (پیش فاکتور / قرارداد) به‌صورت دستی وارد می‌شود و از جمع اقلام محاسبه نمی‌شود
+    private const FINAL_PRICE_RULE = ['final_price' => 'required|numeric|min:0'];
+    private const FINAL_PRICE_MESSAGES = [
+        'final_price.required' => 'مبلغ نهایی را وارد نمایید',
+        'final_price.numeric' => 'مبلغ نهایی باید عدد باشد',
+    ];
+    private const PAYMENT_RULES = [
+        'payments' => 'nullable|array',
+        'payments.*.amount' => 'required|numeric|min:0',
+        'cheques' => 'nullable|array',
+        'cheques.*.amount' => 'required|numeric|min:0',
+    ];
+
+    private function savePaymentsAndCheques(Automation $automation, ?array $payments, ?array $cheques): void
+    {
+        $automation->payments()->delete();
+        foreach ($payments ?? [] as $payment) {
+            $automation->payments()->create([
+                'method' => $payment['method'] ?? null,
+                'amount' => $payment['amount'],
+                'date' => !empty($payment['date']) ? Verta::parse($payment['date'])->datetime() : null,
+            ]);
+        }
+
+        $automation->cheques()->delete();
+        foreach ($cheques ?? [] as $cheque) {
+            $automation->cheques()->create([
+                'number' => $cheque['number'] ?? null,
+                'bank_name' => $cheque['bank_name'] ?? null,
+                'amount' => $cheque['amount'],
+                'due_date' => !empty($cheque['due_date']) ? Verta::parse($cheque['due_date'])->datetime() : null,
+            ]);
+        }
+    }
+
+    /**
+     * اصلاحیه فاکتور و روش پرداخت؛ در هر مرحله‌ای از اتوماسیون (حتی فروش موفق یا ناموفق) قابل انجام است.
+     * وضعیت اتوماسیون تغییر نمی‌کند و یک کامنت خودکار برای سابقه ثبت می‌شود.
+     */
+    public function amend(Request $request)
+    {
+        $this->validate($request, array_merge([
+            'id' => 'required',
+            'orders' => 'nullable|array',
+            'orders.*.orderProductId' => 'required|exists:products,id',
+            'orders.*.orderCount' => 'required|numeric|min:1',
+            'orders.*.orderPrice' => 'required|numeric|min:0',
+        ], self::FINAL_PRICE_RULE, self::PAYMENT_RULES), self::FINAL_PRICE_MESSAGES);
+
+        $automation = Automation::findOrFail($request->input('id'));
+        $oldPrice = $automation->final_price;
+
+        DB::transaction(function () use ($request, $automation, $oldPrice) {
+            if ($request->has('orders'))
+                $this->addOrder($request->input('orders') ?? [], $automation);
+
+            $this->savePaymentsAndCheques($automation, $request->input('payments', []), $request->input('cheques', []));
+
+            $automation->update(['final_price' => $request->input('final_price')]);
+
+            // قرارداد تایید شده‌ای که هنوز امضا نشده، با تغییر فاکتور نیاز به بازبینی و تایید مجدد دارد
+            $automation->contract?->invalidateApproval();
+
+            AutomatonComment::create([
+                'automation_id' => $automation->id,
+                'user_id' => auth()->id(),
+                'content' => 'اصلاحیه فاکتور / روش پرداخت ثبت شد. مبلغ نهایی: '
+                    . number_format((float)$oldPrice) . ' ← ' . number_format((float)$request->input('final_price')) . ' تومان'
+                    . ($request->filled('reason') ? "\nعلت: " . $request->input('reason') : ''),
+            ]);
+        });
+
+        return $this->apiController->respondUpdated('اصلاحیه با موفقیت ثبت شد');
+    }
+
+    // بازگرداندن فروش ناموفق به مرحله درخواست
+    public function restore(Request $request)
+    {
+        $automation = Automation::findOrFail($request->input('id'));
+        if ($automation->status !== Automation::FAILURE)
+            return $this->apiController->respondError('فقط فروش‌های ناموفق قابل بازگردانی هستند');
+
+        $automation->update(['status' => Automation::REQUEST, 'failure_id' => null]);
+
+        return $this->apiController->respondUpdated('درخواست به کارتابل درخواست‌ها بازگردانده شد');
     }
 
 
@@ -160,23 +229,25 @@ class AutomationController extends Controller
     // ثبت سریع پیش فاکتور: فقط با انتخاب مشتری، یک اتوماسیون جدید مستقیماً در مرحله «پیش فاکتور» ساخته می‌شود
     public function quickStore(Request $request)
     {
-        $this->validate($request, [
+        $this->validate($request, array_merge([
             'customer' => 'required',
             'orders' => 'required|array|min:1',
             'orders.*.orderProductId' => 'required|exists:products,id',
             'orders.*.orderCount' => 'required|numeric|min:1',
             'orders.*.orderPrice' => 'required|numeric|min:0',
-        ], [
+        ], self::FINAL_PRICE_RULE), array_merge([
             'customer.required' => 'مشتری را انتخاب نمایید',
             'orders.required' => 'حداقل یک آیتم پیش فاکتور وارد کنید',
-        ]);
+        ], self::FINAL_PRICE_MESSAGES));
 
         $customer = Customer::findOrFail($request->input('customer'));
         $orders = $request->input('orders');
         $description = $request->input('description');
         $referrerPercent = $this->resolveReferrerPercent($request, $customer);
 
-        $automation = DB::transaction(function () use ($customer, $orders, $description, $referrerPercent) {
+        $finalPrice = $request->input('final_price');
+
+        $automation = DB::transaction(function () use ($customer, $orders, $description, $referrerPercent, $finalPrice) {
             $invoice_number = Automation::nextInvoiceNumber();
 
             $automation = Automation::create([
@@ -190,7 +261,7 @@ class AutomationController extends Controller
             if ($customer->status === Customer::LEAD)
                 $customer->update(['status' => Customer::OPPORTUNITY]);
 
-            $finalPrice = $this->addOrder($orders, $automation);
+            $this->addOrder($orders, $automation);
 
             $automation->update([
                 'final_price' => $finalPrice,
@@ -205,15 +276,15 @@ class AutomationController extends Controller
 
     public function accept(Request $request)
     {
-        $this->validate($request, [
+        $this->validate($request, array_merge([
             'id' => 'required',
             'orders' => 'required|array|min:1',
             'orders.*.orderProductId' => 'required|exists:products,id',
             'orders.*.orderCount' => 'required|numeric|min:1',
             'orders.*.orderPrice' => 'required|numeric|min:0',
-        ], [
+        ], self::FINAL_PRICE_RULE), array_merge([
             'orders.required' => 'حداقل یک آیتم پیش فاکتور وارد کنید',
-        ]);
+        ], self::FINAL_PRICE_MESSAGES));
 
         $automation = Automation::findOrFail($request->input('id'));
         $nextStatus = $automation->status + 1;
@@ -221,9 +292,11 @@ class AutomationController extends Controller
         $description = $request->input('description');
         $referrerPercent = $this->resolveReferrerPercent($request, $automation->customer, $automation);
 
-        DB::transaction(function () use ($automation, $orders, $nextStatus, $description, $referrerPercent) {
+        $finalPrice = $request->input('final_price');
+
+        DB::transaction(function () use ($automation, $orders, $nextStatus, $description, $referrerPercent, $finalPrice) {
             $invoice_number = Automation::nextInvoiceNumber();
-            $finalPrice = $this->addOrder($orders, $automation);
+            $this->addOrder($orders, $automation);
 
             $automation->update([
                 'status' => $nextStatus,

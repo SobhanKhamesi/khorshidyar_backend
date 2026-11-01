@@ -76,6 +76,8 @@ class MainController extends Controller
             'installation_service_count' => $installation_service_count,
             // فرم‌های اولیه‌ای که مشتری تکمیل کرده و هنوز در کارتابل دیده نشده‌اند
             'intake_form_count' => IntakeFormController::unseenSubmittedCount(),
+            // قراردادهایی که مشتری امضا کرده و هنوز در کارتابل دیده نشده‌اند
+            'contract_signed_count' => ContractController::unseenSignedCount(),
         ];
 
         return $this->apiController->respondData($data);
