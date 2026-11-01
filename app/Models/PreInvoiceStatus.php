@@ -35,7 +35,7 @@ class PreInvoiceStatus extends Model
 
     public function invoice()
     {
-        return $this->hasOne(Accounting::class);
+        return $this->belongsTo(Accounting::class, 'invoice_id');
     }
 
     public function getJalaliDateAttribute()

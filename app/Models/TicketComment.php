@@ -25,14 +25,24 @@ class TicketComment extends Model
 
     public function invoice()
     {
-        return $this->hasOne(Ticket::class, 'id', 'ticket_id');
+        return $this->belongsTo(Ticket::class, 'ticket_id');
     }
 
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
+
+    // نام نویسنده با همین رابطه eager load می‌شود؛ رابطه user به خاطر هم‌نامی با فیلد خروجی user استفاده نمی‌شود
+    public function author()
+    {
+        return $this->belongsTo(User::class, 'user_id')->select('id', 'name');
+    }
+
+    protected $with = ['author'];
+
+    protected $hidden = ['author'];
 
     protected $appends = [
         'user'
@@ -40,7 +50,7 @@ class TicketComment extends Model
 
     public function getUserAttribute()
     {
-        return $this->user()->first() ? $this->user()->first()->name : null;
+        return $this->author?->name;
     }
 
 

@@ -50,13 +50,17 @@ class Targeting extends Model
 
     public function getStatusAttribute()
     {
-        $salesCheck = 0;
-        $calls = Call::where('user_id', $this->user)->whereBetween('date', [$this->start_date, $this->end_date])->count() >= $this->calls;
-        $sales = Automation::where('user_id', $this->user)->where('status', Automation::SUCCESS)->whereBetween('created_at', [$this->start_date, $this->end_date])->get();
-        foreach ($sales as $item)
-            $salesCheck += $item->final_price;
+        // ستون user در این جدول شناسه کاربر است (نه رابطه)
+        $userId = $this->getAttributes()['user'] ?? null;
 
-        $sales = $salesCheck >= $this->sales;
+        $calls = Call::where('user_id', $userId)->whereBetween('date', [$this->start_date, $this->end_date])->count() >= $this->calls;
+
+        $salesSum = Automation::where('user_id', $userId)
+            ->where('status', Automation::SUCCESS)
+            ->whereBetween('created_at', [$this->start_date, $this->end_date])
+            ->sum('final_price');
+
+        $sales = $salesSum >= $this->sales;
 
         if ($this->end_date < Carbon::now()) {
             return [$calls && $sales, 0];
@@ -67,7 +71,7 @@ class Targeting extends Model
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user');
+        return $this->belongsTo(User::class, 'user');
     }
 
 

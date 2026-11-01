@@ -25,13 +25,13 @@ class Comment extends Model
 
     public function invoice()
     {
-        return $this->hasOne(Leave::class, 'id', 'leave_id');
+        return $this->belongsTo(Leave::class, 'leave_id');
     }
 
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     protected $appends = [

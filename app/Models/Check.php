@@ -53,18 +53,18 @@ class Check extends Model
 
     public function customer()
     {
-        return $this->hasOne(Customer::class, 'id', 'customer_id');
+        return $this->belongsTo(Customer::class, 'customer_id')->withStats();
     }
 
     public function bankAccount()
     {
-        return $this->hasOne(BankAccount::class, 'id', 'bank_account_id');
+        return $this->belongsTo(BankAccount::class, 'bank_account_id');
     }
 
 
     public function bank()
     {
-        return $this->hasOne(Bank::class, 'id', 'bank_id');
+        return $this->belongsTo(Bank::class, 'bank_id');
     }
 
 

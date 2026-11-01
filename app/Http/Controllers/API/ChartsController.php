@@ -9,13 +9,13 @@ use App\Models\Automation;
 use App\Models\Call;
 use App\Models\Customer;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\SourceCategory;
 use App\Models\Targeting;
 use App\Models\User;
 use Carbon\Carbon;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
-use Morilog\Jalali\Jalalian;
 
 class ChartsController extends Controller
 {
@@ -23,171 +23,108 @@ class ChartsController extends Controller
     private ApiController $apiController;
     private ApiHelper $apiHelper;
 
+    private const MONTHS = [
+        1 => 'فروردین', 2 => 'اردیبهشت', 3 => 'خرداد', 4 => 'تیر', 5 => 'مرداد', 6 => 'شهریور',
+        7 => 'مهر', 8 => 'آبان', 9 => 'آذر', 10 => 'دی', 11 => 'بهمن', 12 => 'اسفند',
+    ];
+
     public function __construct(ApiController $apiController, ApiHelper $apiHelper)
     {
         $this->apiController = $apiController;
         $this->apiHelper = $apiHelper;
     }
 
+    /**
+     * اعمال بازه تاریخ شمسی startDate/endDate درخواست روی ستون داده شده؛
+     * اگر هیچ‌کدام ارسال نشده باشد ۳۰ روز اخیر در نظر گرفته می‌شود.
+     */
+    private function applyDateRange($query, Request $request, string $column)
+    {
+        $start = $request->input('startDate') ? Verta::parse($request->input('startDate'))->datetime() : null;
+        $end = $request->input('endDate') ? Verta::parse($request->input('endDate'))->datetime() : null;
+
+        if ($start && $end)
+            return $query->whereBetween($column, [$start, $end]);
+        if ($start)
+            return $query->whereDate($column, '>=', $start);
+        if ($end)
+            return $query->whereDate($column, '<=', $end);
+
+        return $query->whereBetween($column, [Carbon::now()->subDays(30), Carbon::now()]);
+    }
+
+    private function onlyMine($query)
+    {
+        return $query->when(auth()->user()->role === User::KARSHENAS_FANI, fn($q) => $q->where('user_id', auth()->id()));
+    }
 
     public function getProducts()
     {
-        $collectionProducts = Order::query()
-            ->whereHas('automation', function ($query) {
-                $query->where('status', Automation::SUCCESS);
-            })
+        $collection = Order::query()
+            ->whereHas('automation', fn($query) => $query->where('status', Automation::SUCCESS))
+            ->toBase()
             ->groupBy('product_id')
             ->selectRaw('SUM(count) as total, product_id')
             ->orderByDesc('total')
             ->get();
 
+        $names = Product::whereIn('id', $collection->pluck('product_id'))->pluck('name', 'id');
+
         $products = [];
         $counts = [];
-
-        foreach ($collectionProducts as $collection) {
-            if ($collection->product) {
-                $products[] = $collection->product->name;
-                $counts[] = $collection->total;
+        foreach ($collection as $row) {
+            if (isset($names[$row->product_id])) {
+                $products[] = $names[$row->product_id];
+                $counts[] = $row->total;
             }
         }
-
 
         return $this->apiController->respondData([
             'product' => $products,
             'count' => $counts
         ]);
-
     }
 
+    // تعداد اتوماسیون‌های ثبت شده به تفکیک روز (یا ماه در صورت ارسال monthly)
     public function getInvoice(Request $request)
     {
+        $monthly = (bool)$request->input('monthly');
 
-        $startDate = $request->input('startDate');
-        $endDate = $request->input('endDate');
-        $type = $request->input('monthly');
+        $createdDates = $this->applyDateRange(Automation::query()->toBase(), $request, 'created_at')
+            ->pluck('created_at');
 
-        $convertedStartDate = $startDate ? Verta::parse($startDate)->datetime() : null;
-        $convertedEndDate = $endDate ? Verta::parse($endDate)->datetime() : null;
-
-        $collectionProfitFilteredSales = Automation::query();
-
-        if ($convertedStartDate && $convertedEndDate) {
-            $collectionProfitFilteredSales->whereBetween('date', [$convertedStartDate, $convertedEndDate]);
-        } elseif ($convertedStartDate && !$convertedEndDate) {
-            $collectionProfitFilteredSales->whereDate('date', '>=', $convertedStartDate);
-        } elseif (!$convertedStartDate && $convertedEndDate) {
-            $collectionProfitFilteredSales->whereDate('date', '<=', $convertedEndDate);
-        } else {
-            $collectionProfitFilteredSales->whereBetween('date', [Carbon::now()->subDays(30), Carbon::now()]);
+        $chart = [];
+        foreach ($createdDates as $createdAt) {
+            $key = (new Verta($createdAt))->format($monthly ? 'Y/m' : 'Y/m/d');
+            $chart[$key] = ($chart[$key] ?? 0) + 1;
         }
 
+        ksort($chart);
 
-        $dates = [];
-        $counts = [];
-        $chartInvoice = [];
-
-        foreach ($collectionProfitFilteredSales->get() as $item) {
-            $jalaliDate = $item->jalali_date;
-            $chartInvoice[$jalaliDate] = $chartInvoice[$jalaliDate] ?? ['count' => 0];
-            $chartInvoice[$jalaliDate]['count']++;
-        }
-
-        ksort($chartInvoice);
-
-        $chartInvoiceMonthAndYear = [];
-
-        foreach ($chartInvoice as $key => $val) {
-            if ($val['count'] !== 0) {
-                if ($type) {
-                    $monthAndYear = implode('/', explode('/', $key, 2));
-                    $chartInvoiceMonthAndYear[$monthAndYear] = $chartInvoiceMonthAndYear[$monthAndYear] ?? ['count' => 0];
-                    $chartInvoiceMonthAndYear[$monthAndYear]['count'] += $val['count'];
-                } else {
-                    $dates[] = $key;
-                    $counts[] = $val['count'];
-                }
-            }
-        }
-
-        if ($type) {
-            foreach ($chartInvoiceMonthAndYear as $key => $val) {
-                $dates[] = $key;
-                $counts[] = $val['count'];
-            }
-        }
-
-        $invoicesChart = [
-            'date' => $dates ?? [],
-            'count' => $counts ?? []
-        ];
-
-        return $this->apiController->respondData($invoicesChart);
-
+        return $this->apiController->respondData([
+            'date' => array_keys($chart),
+            'count' => array_values($chart),
+        ]);
     }
 
     public function getSeller(Request $request)
     {
-        $startDate = $request ? $request->input('startDate') : null;
-        $endDate = $request ? $request->input('endDate') : null;
+        $list = $this->applyDateRange(Automation::query()->toBase(), $request, 'created_at')
+            ->where('status', Automation::SUCCESS)
+            ->groupBy('user_id')
+            ->selectRaw('sum(final_price) as total, user_id')
+            ->orderByDesc('total')
+            ->take(5)
+            ->get();
 
-
-        if ($startDate != null and $endDate != null) {
-            $convertedStartDate = Verta::parse($request->input('startDate'))->datetime();
-            $convertedEndDate = Verta::parse($request->input('endDate'))->datetime();
-
-
-            $list = Automation::where('status', Automation::SUCCESS)->
-            whereBetween('created_at', [$convertedStartDate, $convertedEndDate])
-                ->groupBy('user_id')
-                ->selectRaw('sum(final_price) as total, user_id')
-                ->orderBy('total', 'DESC')
-                ->take(5)
-                ->get();
-
-        } elseif ($startDate != null and $endDate == null) {
-            $convertedStartDate = Verta::parse($request->input('startDate'))->datetime();
-
-            $list = Automation::where('status', Automation::SUCCESS)->
-            whereDate('created_at', '>=', $convertedStartDate)
-                ->groupBy('user_id')
-                ->selectRaw('sum(final_price) as total, user_id')
-                ->orderBy('total', 'DESC')
-                ->take(5)
-                ->get();
-
-
-        } elseif ($startDate == null and $endDate != null) {
-            $convertedEndDate = Verta::parse($request->input('endDate'))->datetime();
-
-            $list = Automation::where('status', Automation::SUCCESS)->
-            whereDate('created_at', '<=', $convertedEndDate)
-                ->groupBy('user_id')
-                ->selectRaw('sum(final_price) as total, user_id')
-                ->orderBy('total', 'DESC')
-                ->take(5)
-                ->get();
-
-
-        } else {
-            $list = Automation::where('status', Automation::SUCCESS)->
-            whereBetween('created_at', [Carbon::now()->subDays(30), Carbon::now()])
-                ->groupBy('user_id')
-                ->selectRaw('sum(final_price) as total, user_id')
-                ->orderBy('total', 'DESC')
-                ->take(5)
-                ->get();
-
-
-        }
-
+        $names = User::whereIn('id', $list->pluck('user_id'))->pluck('name', 'id');
 
         $users = [];
         $counts = [];
-
-        foreach ($list as $collection) {
-            if ($collection->user) {
-                $users[] = $collection->user->name;
-                $counts[] = $collection->total;
+        foreach ($list as $row) {
+            if (isset($names[$row->user_id])) {
+                $users[] = $names[$row->user_id];
+                $counts[] = $row->total;
             }
         }
 
@@ -195,527 +132,137 @@ class ChartsController extends Controller
             'user' => $users,
             'count' => $counts
         ];
-
-
     }
 
+    // فروش هر کاربر در یک ماه شمسی در مقایسه با هدف تعیین شده برای او
     public function getTargeting(Request $request)
     {
+        $now = verta();
 
-        $v = verta();
-        $selectedMonth = null;
-        $startDate = null;
-        $endDate = null;
-
-
-        if ($request->has('date') && $request->input('date') != null) {
-            $requestedDate = $selectedDate = $request->input('date');
-            $requestedMonth = explode(' ', $requestedDate)[0];
-            $requestedYear = explode(' ', $requestedDate)[1];
-            switch ($requestedMonth) {
-                case 'فروردین':
-                    $startDate = $requestedYear . '/01/01';
-                    $endDate = $requestedYear . '/01/31';
-                    break;
-                case 'اردیبهشت':
-                    $startDate = $requestedYear . '/02/01';
-                    $endDate = $requestedYear . '/02/31';
-                    break;
-                case 'خرداد':
-                    $startDate = $requestedYear . '/03/01';
-                    $endDate = $requestedYear . '/03/31';
-                    break;
-                case 'تیر':
-                    $startDate = $requestedYear . '/04/01';
-                    $endDate = $requestedYear . '/04/31';
-                    break;
-                case 'مرداد':
-                    $startDate = $requestedYear . '/05/01';
-                    $endDate = $requestedYear . '/05/31';
-                    break;
-                case 'شهریور':
-                    $startDate = $requestedYear . '/06/01';
-                    $endDate = $requestedYear . '/06/31';
-                    break;
-                case 'مهر':
-                    $startDate = $requestedYear . '/07/01';
-                    $endDate = $requestedYear . '/07/30';
-                    break;
-                case 'آبان':
-                    $startDate = $requestedYear . '/08/01';
-                    $endDate = $requestedYear . '/08/30';
-                    break;
-                case 'آذر':
-                    $startDate = $requestedYear . '/09/01';
-                    $endDate = $requestedYear . '/09/30';
-                    break;
-                case 'دی':
-                    $startDate = $requestedYear . '/10/01';
-                    $endDate = $requestedYear . '/10/30';
-                    break;
-                case 'بهمن':
-                    $startDate = $requestedYear . '/11/01';
-                    $endDate = $requestedYear . '/11/30';
-                    break;
-                case 'اسفند':
-                    $startDate = $requestedYear . '/12/01';
-                    $endDate = $requestedYear . '/12/30';
-                    break;
-            }
-
-
-        } else {
-            switch ($v->month) {
-                case '1':
-                    $selectedMonth = 'فروردین';
-                    $startDate = $v->startYear()->format('Y/m/d');
-                    $endDate = $v->year . '/01/31';
-                    break;
-                case '2':
-                    $startDate = $v->year . '/02/01';
-                    $endDate = $v->year . '/02/31';
-                    $selectedMonth = 'اردیبهشت';
-                    break;
-                case '3':
-                    $startDate = $v->year . '/03/01';
-                    $endDate = $v->year . '/03/31';
-                    $selectedMonth = 'خرداد';
-                    break;
-                case '4':
-                    $startDate = $v->year . '/04/01';
-                    $endDate = $v->year . '/04/31';
-                    $selectedMonth = 'تیر';
-                    break;
-                case '5':
-                    $startDate = $v->year . '/05/01';
-                    $endDate = $v->year . '/05/31';
-                    $selectedMonth = 'مرداد';
-                    break;
-                case '6':
-                    $startDate = $v->year . '/06/01';
-                    $endDate = $v->year . '/06/31';
-                    $selectedMonth = 'شهریور';
-                    break;
-                case '7':
-                    $startDate = $v->year . '/07/01';
-                    $endDate = $v->year . '/07/30';
-                    $selectedMonth = 'مهر';
-                    break;
-                case '8':
-                    $startDate = $v->year . '/08/01';
-                    $endDate = $v->year . '/08/30';
-                    $selectedMonth = 'آبان';
-                    break;
-                case '9':
-                    $startDate = $v->year . '/09/01';
-                    $endDate = $v->year . '/09/30';
-                    $selectedMonth = 'آذر';
-                    break;
-                case '10':
-                    $startDate = $v->year . '/10/01';
-                    $endDate = $v->year . '/10/30';
-                    $selectedMonth = 'دی';
-                    break;
-                case '11':
-                    $startDate = $v->year . '/11/01';
-                    $endDate = $v->year . '/11/30';
-                    $selectedMonth = 'بهمن';
-                    break;
-                case '12':
-                    $startDate = $v->year . '/12/01';
-                    $endDate = $v->endYear()->format('Y/m/d');
-                    $selectedMonth = 'اسفند';
-                    break;
-            }
-            $selectedDate = $selectedMonth . ' ' . $v->year;
-        }
-
-
-        if ($startDate != null)
-            $startDate = Verta::parse($startDate)->datetime();
-        if ($endDate != null)
-            $endDate = Verta::parse($endDate)->datetime();
-
-
-        if ($startDate != null and $endDate != null) {
-
-            $sales = Automation::query()
-                ->groupBy('user_id')
-                ->selectRaw('sum(final_price) as total,user_id')
-                ->whereBetween('date', [$startDate, $endDate])
-                ->get();
-
-
-        } elseif ($startDate != null and $endDate == null) {
-
-
-            $sales = Automation::query()
-                ->groupBy('user_id')
-                ->selectRaw('sum(final_price) as total,user_id')
-                ->whereDate('date', '>=', $startDate)
-                ->get();
-
-
-        } elseif ($startDate == null and $endDate != null) {
-
-
-            $sales = Automation::query()
-                ->groupBy('user_id')
-                ->selectRaw('sum(final_price) as total,user_id')
-                ->whereDate('date', '<=', $endDate)
-                ->get();
-
-        } else {
-
-            $currentStartMonthDay = verta()->startMonth();
-            $currentEndMonthDay = verta()->endMonth()->addDay();
-            $currentStartDate = Verta::getGregorian($currentStartMonthDay->year, $currentStartMonthDay->month, $currentStartMonthDay->day);
-            $currentEndDate = Verta::getGregorian($currentEndMonthDay->year, $currentEndMonthDay->month, $currentEndMonthDay->day);
-
-            $convertedCurrentStartDate = $currentStartDate[0] . '-' . $currentStartDate[1] . '-' . $currentStartDate[2];
-            $convertedCurrentEndDate = $currentEndDate[0] . '-' . $currentEndDate[1] . '-' . $currentEndDate[2];
-
-
-            $sales = Automation::query()
-                ->whereBetween('date', [$convertedCurrentStartDate, $convertedCurrentEndDate])
-                ->groupBy('user_id')
-                ->selectRaw('sum(final_price) as total,user_id')
-                ->get();
-
-        }
-
-        $targetingInvoice = [];
-
-
-        foreach ($sales as $collection) {
-            $amount = $collection->total;
-            if ($amount > 0) {
-                if (array_key_exists($collection->user_id, $targetingInvoice)) {
-                    $targetingInvoice[$collection->user_id]['amount'] += $amount;
-                } else {
-                    $targetingInvoice[$collection->user_id] = [
-                        'amount' => $amount,
-                        'username' => User::findOrFail($collection->user_id)->name,
-                    ];
-                }
+        // ورودی به شکل «مهر 1405»؛ در صورت عدم ارسال، ماه جاری
+        $year = $now->year;
+        $month = $now->month;
+        if ($request->input('date')) {
+            [$monthName, $requestedYear] = array_pad(explode(' ', trim($request->input('date')), 2), 2, null);
+            $requestedMonth = array_search($monthName, self::MONTHS, true);
+            if ($requestedMonth !== false && is_numeric($requestedYear)) {
+                $month = $requestedMonth;
+                $year = (int)$requestedYear;
             }
         }
+        $selectedDate = self::MONTHS[$month] . ' ' . $year;
+
+        $monthStart = Verta::createJalali($year, $month, 1, 0, 0, 0);
+        $startDate = $monthStart->datetime();
+        $endDate = (clone $monthStart)->endMonth()->datetime();
+
+        $sales = Automation::query()->toBase()
+            ->where('status', Automation::SUCCESS)
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->groupBy('user_id')
+            ->selectRaw('sum(final_price) as total, user_id')
+            ->having('total', '>', 0)
+            ->get();
+
+        $userIds = $sales->pluck('user_id');
+        $names = User::whereIn('id', $userIds)->pluck('name', 'id');
+
+        $targets = Targeting::query()->toBase()
+            ->whereIn('user', $userIds)
+            ->where('month', $selectedDate)
+            ->whereDate('start_date', '>=', $startDate)
+            ->whereDate('end_date', '<=', $endDate)
+            ->groupBy('user')
+            ->selectRaw('sum(sales) as total, user')
+            ->pluck('total', 'user');
 
         $users = [];
         $forosh = [];
         $mande = [];
+        foreach ($sales as $row) {
+            if (!isset($names[$row->user_id]))
+                continue;
 
-        foreach ($targetingInvoice as $key => $val) {
-            $target = null;
-            $users[] = $val['username'];
-            $target = Targeting::where('user', $key)->where('month', $selectedDate);
-
-            if (isset($startDate) && isset($endDate)) {
-
-
-                $target->whereDate('start_date', '>=', $startDate)
-                    ->whereDate('end_date', '<=', $endDate);
-
-
-            } else if (isset($startDate) && !isset($endDate)) {
-
-
-                $target->whereDate('start_date', '>=', $startDate);
-
-
-            } else if (!isset($startDate) && isset($endDate)) {
-                $target->whereDate('end_date', '<=', $endDate);
-
-
-            } else {
-                $currentStartMonthDay = verta()->startMonth();
-                $currentEndMonthDay = verta()->endMonth()->addDay();
-                $currentStartDate = Verta::getGregorian($currentStartMonthDay->year, $currentStartMonthDay->month, $currentStartMonthDay->day);
-                $currentEndDate = Verta::getGregorian($currentEndMonthDay->year, $currentEndMonthDay->month, $currentEndMonthDay->day);
-
-                $convertedCurrentStartDate = $currentStartDate[0] . '-' . $currentStartDate[1] . '-' . $currentStartDate[2];
-                $convertedCurrentEndDate = $currentEndDate[0] . '-' . $currentEndDate[1] . '-' . $currentEndDate[2];
-
-
-                $target->whereDate('start_date', '>=', $convertedCurrentStartDate)->whereDate('end_date', '<', $convertedCurrentEndDate);
-
-            }
-
-            $mande[] = intval($target->sum('sales')) - intval($val['amount']) > 0 ? intval($target->sum('sales')) - intval($val['amount']) : 0;
-            $forosh[] = intval($val['amount']);
-
+            $amount = intval($row->total);
+            $users[] = $names[$row->user_id];
+            $forosh[] = $amount;
+            $mande[] = max(intval($targets[$row->user_id] ?? 0) - $amount, 0);
         }
 
-        $dates = Targeting::groupBy('month')->get();
-        $datesArr = [];
-        foreach ($dates as $item) {
-            $datesArr[] = $item->month;
-        }
+        $dates = Targeting::query()->toBase()
+            ->groupBy('month')
+            ->selectRaw('month, min(start_date) as first_start')
+            ->orderBy('first_start')
+            ->pluck('month')
+            ->all();
 
-
-        $v = verta();
-        switch ($v->month) {
-            case '1':
-                $selectedMonth = 'فروردین';
-                break;
-            case '2':
-                $selectedMonth = 'اردیبهشت';
-                break;
-            case '3':
-                $selectedMonth = 'خرداد';
-                break;
-            case '4':
-                $selectedMonth = 'تیر';
-                break;
-            case '5':
-                $selectedMonth = 'مرداد';
-                break;
-            case '6':
-                $selectedMonth = 'شهریور';
-                break;
-            case '7':
-                $selectedMonth = 'مهر';
-                break;
-            case '8':
-                $selectedMonth = 'آبان';
-                break;
-            case '9':
-                $selectedMonth = 'آذر';
-                break;
-            case '10':
-                $selectedMonth = 'دی';
-                break;
-            case '11':
-                $selectedMonth = 'بهمن';
-                break;
-            case '12':
-                $selectedMonth = 'اسفند';
-                break;
-        }
-
-
-        $current = $selectedMonth . ' ' . $v->year;
-
-        $targetingChart = [
-            'current' => $current,
-            'dates' => array_reverse($datesArr),
+        return $this->apiController->respondData([
+            'current' => self::MONTHS[$now->month] . ' ' . $now->year,
+            'dates' => array_reverse($dates),
             'users' => $users,
             'forosh' => $forosh,
             'mande' => $mande
-        ];
-
-
-        return $this->apiController->respondData($targetingChart);
-
+        ]);
     }
-
 
     public function getMethod()
     {
+        $collection = $this->onlyMine(Customer::query()->toBase())
+            ->groupBy('source_id')
+            ->selectRaw('count(*) as total, source_id')
+            ->orderByDesc('total')
+            ->get();
 
-        if (auth()->user()->role === User::KARSHENAS_FANI) {
-            $collectionCustomersSource = Customer::where('user_id', auth()->id())->groupBy('source_id')->selectRaw('count(*) as total,source_id')->orderby('total', 'DESC')->get();
-        } else {
-            $collectionCustomersSource = Customer::groupBy('source_id')->selectRaw('count(*) as total,source_id')->orderby('total', 'DESC')->get();
-        }
+        $titles = SourceCategory::whereIn('id', $collection->pluck('source_id')->filter())->pluck('title', 'id');
 
         $source = [];
         $percent = [];
-
-        $all = $collectionCustomersSource->sum('total');
-
-
-        foreach ($collectionCustomersSource as $collection) {
-            $sourceItem = SourceCategory::find($collection->source_id);
-            if ($sourceItem) {
-                $source[] = $sourceItem->title;
-                $percent[] = (int)$collection->total;
+        foreach ($collection as $row) {
+            if (isset($titles[$row->source_id])) {
+                $source[] = $titles[$row->source_id];
+                $percent[] = (int)$row->total;
             }
         }
 
-
-        $methodchart = [
+        return $this->apiController->respondData([
             'source' => $source,
             'percent' => $percent
-        ];
-        return $this->apiController->respondData($methodchart);
+        ]);
     }
 
     public function getStatus(Request $request)
     {
-        $startDate = $request ? $request->input('startDate') : null;
-        $endDate = $request ? $request->input('endDate') : null;
+        $list = $this->applyDateRange($this->onlyMine(Customer::query()->toBase()), $request, 'created_at')
+            ->groupBy(['user_id', 'lead_status'])
+            ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
+            ->get();
 
-
-        if ($startDate != null and $endDate != null) {
-            $convertedStartDate = Verta::parse($request->input('startDate'))->datetime();
-            $convertedEndDate = Verta::parse($request->input('endDate'))->datetime();
-
-
-            if (auth()->user()->role === User::KARSHENAS_FANI) {
-                $list = Customer::where('user_id', auth()->id())
-                    ->whereBetween('created_at', [$convertedStartDate, $convertedEndDate])
-                    ->groupBy(['user_id', 'lead_status'])
-                    ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                    ->get();
-            } else {
-                $list = Customer::
-                whereBetween('created_at', [$convertedStartDate, $convertedEndDate])
-                    ->groupBy(['user_id', 'lead_status'])
-                    ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                    ->get();
-            }
-
-
-        } elseif ($startDate != null and $endDate == null) {
-            $convertedStartDate = Verta::parse($request->input('startDate'))->datetime();
-
-            if (auth()->user()->role === User::KARSHENAS_FANI) {
-                $list = Customer::where('user_id', auth()->id())
-                    ->whereDate('created_at', '>=', $convertedStartDate)
-                    ->groupBy(['user_id', 'lead_status'])
-                    ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                    ->get();
-            } else {
-                $list = Customer::
-                whereDate('created_at', '>=', $convertedStartDate)
-                    ->groupBy(['user_id', 'lead_status'])
-                    ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                    ->get();
-            }
-
-
-        } elseif ($startDate == null and $endDate != null) {
-            $convertedEndDate = Verta::parse($request->input('endDate'))->datetime();
-
-            if (auth()->user()->role === User::KARSHENAS_FANI) {
-                $list = Customer::where('user_id', auth()->id())
-                    ->whereDate('created_at', '<=', $convertedEndDate)
-                    ->groupBy(['user_id', 'lead_status'])
-                    ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                    ->get();
-            } else {
-                $list = Customer::whereDate('created_at', '<=', $convertedEndDate)
-                    ->groupBy(['user_id', 'lead_status'])
-                    ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                    ->get();
-            }
-
-
-        } else {
-
-            if (auth()->user()->role === User::KARSHENAS_FANI) {
-                $list = Customer::where('user_id' , auth()->id())
-                    ->whereBetween('created_at', [Carbon::now()->subDays(30), Carbon::now()])
-                    ->groupBy(['user_id', 'lead_status'])
-                    ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                    ->get();
-            } else {
-                $list = Customer::whereBetween('created_at', [Carbon::now()->subDays(30), Carbon::now()])
-                    ->groupBy(['user_id', 'lead_status'])
-                    ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                    ->get();
-            }
-        }
-
-
-        $statusOptions = [
-            ['label' => 'تمایل به خرید', 'value' => 0],
-            ['label' => 'نیاز به پیگیری', 'value' => 1],
-            ['label' => 'عدم تمایل به خرید', 'value' => 2],
-            ['label' => 'عدم پاسخگویی', 'value' => 3],
-            ['label' => 'تماس گرفته نشد', 'value' => 4]
-        ];
-
-        $users = User::pluck('name', 'id')->toArray();
-        $statuses = array_column($statusOptions, 'label', 'value');
-
-
-        $data = [];
-
-
-        foreach ($list as $collection) {
-            $userId = $collection->user_id;
-            $lead_status = $collection->lead_status;
-            $total = $collection->total;
-
-            if (!isset($data[$users[$userId]])) {
-                $data[$users[$userId]] = array_fill_keys(array_keys($statuses), 0);
-            }
-
-            $data[$users[$userId]][$lead_status] = $total;
-        }
-        return response()->json(['chartsData' => $data]);
-
+        return response()->json(['chartsData' => DashboardController::leadStatusChart($list)]);
     }
-
-
-    public $call = [];
-    public $count = [];
 
     public function getReport(Request $request)
     {
+        $collection = $this->applyDateRange(Call::query()->toBase(), $request, 'created_at')
+            ->groupBy('user_id')
+            ->selectRaw('COUNT(*) as total, user_id')
+            ->orderByDesc('user_id')
+            ->get();
 
-        $startDate = $request ? $request->input('startDate') : null;
-        $endDate = $request ? $request->input('endDate') : null;
+        $names = User::whereIn('id', $collection->pluck('user_id'))->pluck('name', 'id');
 
-
-        if ($startDate != null and $endDate != null) {
-            $convertedStartDate = Verta::parse($request->input('startDate'))->datetime();
-            $convertedEndDate = Verta::parse($request->input('endDate'))->datetime();
-
-            $collectionCalls = Call::
-            whereBetween('created_at', [$convertedStartDate, $convertedEndDate])
-                ->groupBy('user_id')
-                ->selectRaw('COUNT(*) as total, user_id')
-                ->orderBy('user_id', 'desc')
-                ->get();
-
-        } elseif ($startDate != null and $endDate == null) {
-            $convertedStartDate = Verta::parse($request->input('startDate'))->datetime();
-
-            $collectionCalls = Call::
-            whereDate('created_at', '>=', $convertedStartDate)
-                ->groupBy('user_id')
-                ->selectRaw('COUNT(*) as total, user_id')
-                ->orderBy('user_id', 'desc')
-                ->get();
-
-
-        } elseif ($startDate == null and $endDate != null) {
-            $convertedEndDate = Verta::parse($request->input('endDate'))->datetime();
-
-            $collectionCalls = Call::whereDate('created_at', '<=', $convertedEndDate)
-                ->groupBy('user_id')
-                ->selectRaw('COUNT(*) as total, user_id')
-                ->orderBy('user_id', 'desc')
-                ->get();
-
-
-        } else {
-            $collectionCalls = Call::whereBetween('created_at', [Carbon::now()->subDays(30), Carbon::now()])
-                ->groupBy('user_id')
-                ->selectRaw('COUNT(*) as total, user_id')
-                ->orderBy('user_id', 'desc')
-                ->get();
-
-
+        $call = [];
+        $count = [];
+        foreach ($collection as $row) {
+            if (isset($names[$row->user_id])) {
+                $call[] = $names[$row->user_id];
+                $count[] = $row->total;
+            }
         }
-
-        foreach ($collectionCalls as $collection) {
-
-            $user = User::find($collection->user_id);
-
-            $this->call[] = $user->name;
-            $this->count[] = $collection->total;
-
-        }
-
 
         return response()->json([
             'data' => [
-                'call' => $this->call,
-                'count' => $this->count
+                'call' => $call,
+                'count' => $count
             ]
         ]);
     }

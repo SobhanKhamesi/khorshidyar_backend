@@ -54,12 +54,12 @@ class Reminder extends Model
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     public function customer()
     {
-        return $this->hasOne(Customer::class, 'id', 'customer_id');
+        return $this->belongsTo(Customer::class, 'customer_id');
     }
 
     /**
@@ -81,7 +81,7 @@ class Reminder extends Model
 
     public function getSabtKonandeAttribute()
     {
-        return $this->user->name;
+        return $this->user?->name;
 
     }
 

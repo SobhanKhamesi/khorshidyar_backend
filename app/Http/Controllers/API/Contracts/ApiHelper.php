@@ -42,6 +42,27 @@ class ApiHelper extends Controller
     }
 
 
+    /**
+     * پاک‌سازی و اعتبارسنجی درصد معرف ارسالی.
+     * فرانت در FormData مقادیر خالی را به‌صورت رشته‌های "null"/"undefined" می‌فرستد؛ این‌ها null در نظر گرفته می‌شوند.
+     * خروجی: عدد صحیح ۰ تا ۱۰۰ یا null (یعنی مقداری ارسال نشده است).
+     */
+    public function referrerPercent($request): ?int
+    {
+        $value = $this->getRealText($request, 'referrer_percent');
+        $value = is_string($value) ? trim($value) : $value;
+        $request->merge(['referrer_percent' => ($value === '' ? null : $value)]);
+
+        $request->validate([
+            'referrer_percent' => 'nullable|integer|between:0,100',
+        ], [
+            'referrer_percent.integer' => 'درصد معرف باید عدد صحیح باشد',
+            'referrer_percent.between' => 'درصد معرف باید بین ۰ تا ۱۰۰ باشد',
+        ]);
+
+        return $request->input('referrer_percent') === null ? null : (int)$request->input('referrer_percent');
+    }
+
     function sortArray(&$array, $subfield)
     {
         $sortArray = array();

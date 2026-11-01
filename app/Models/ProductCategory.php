@@ -24,17 +24,17 @@ class ProductCategory extends Model
         'user_id'
     ];
 
-    public $with = ['inventory'];
+    public $with = ['inventory', 'user'];
     public $appends = ['SabtKonande', 'SabtInventory'];
 
     public function inventory()
     {
-        return $this->hasOne(Inventory::class, 'id', 'inventory_id');
+        return $this->belongsTo(Inventory::class, 'inventory_id');
     }
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     public function getSabtKonandeAttribute()

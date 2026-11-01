@@ -9,8 +9,8 @@ use App\Models\Customer;
 use App\Models\Rating;
 use App\Models\Sms;
 use App\Models\SourceSms;
-use Carbon\Carbon;
 use Hekmatinasser\Verta\Verta;
+use App\Services\SmsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -199,9 +199,6 @@ class AfterSalesServiceController extends Controller
 
     public function Sms(AfterSalesService $service)
     {
-        $smsTotalCount = 0;
-        $mobilesArray = [];
-
         $sms = SourceSms::where('title', 'نظرسنجی')->first();
 
         if (!$sms)
@@ -210,36 +207,10 @@ class AfterSalesServiceController extends Controller
         $new_rating = Rating::getOrCreateFor($service);
 
         $customer = $service->customer;
-        $mobile = $customer->contact_number;
-        $name = $customer->name;
-        $content = '';
-        if ($customer->type == 0) {
-            $content = 'آقای ';
-        } elseif ($customer->type == 1) {
-            $content = 'خانم ';
-        }
-        $content .= $name;
-        $content .= "\n";
-        $content .= "\n";
-        $content .= $sms->description;
-        $content .= "\n";
-        $content .= "لینک صفحه نظرسنجی : ";
-        $content .= "https://khrshdyar.ir/survey/" . $new_rating->token;
+        $content = $customer->greeting_name . "\n\n" . $sms->description . "\n"
+            . "لینک صفحه نظرسنجی : " . rtrim(config('services.frontend_url'), '/') . '/survey/' . $new_rating->token;
 
-        $urlSMS = "https://RayganSMS.com/SendMessageWithUrl.ashx?Username=" . urlencode(env('TREZ_USERNAME')) . "&Password=" . urlencode(env('TREZ_PASSWORD')) . "&PhoneNumber=" . urlencode(env('TREZ_NUMBER')) . "&MessageBody=" . urlencode($content) . "&RecNumber=" . urlencode($mobile) . "&Smsclass=1";
-        if (file_get_contents($urlSMS)) {
-            $mobilesArray[] = $mobile;
-            $smsTotalCount++;
-        }
-
-        $create = Sms::create([
-            'receivers' => $mobilesArray,
-            'count' => $smsTotalCount,
-            'body' => $content,
-            'sent_at' => Carbon::now(),
-            'customer_id' => $customer->id,
-            'user_id' => auth()->id()
-        ]);
+        $create = app(SmsService::class)->sendAndLog($customer, $content);
 
         if ($create) {
             return $this->apiController->respondCreated('با موفقیت ویرایش و پیامک ارسال شد');

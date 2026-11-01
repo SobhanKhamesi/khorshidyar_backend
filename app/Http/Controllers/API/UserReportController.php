@@ -45,9 +45,9 @@ class UserReportController extends Controller
 
             $invoices = Automation::where('status', Automation::SUCCESS)->get();
             $calls = Call::get();
-            $products = Product::get();
+            $products = Product::withStats()->get();
             $sms = Sms::get();
-            $leads = Customer::where('status', 0)->get();
+            $leads = Customer::withStats()->where('status', Customer::LEAD)->get();
             $plan = Planning::get();
             $reminder = Reminder::get();
             $report = [];
@@ -136,9 +136,9 @@ class UserReportController extends Controller
 
             $invoices = Automation::where('user_id', auth()->id())->where('status', Automation::SUCCESS)->get();
             $calls = Call::where('user_id', auth()->id())->get();
-            $products = Product::where('user_id', auth()->id())->get();
+            $products = Product::withStats()->where('user_id', auth()->id())->get();
             $sms = Sms::where('user_id', auth()->id())->get();
-            $leads = Customer::where('user_id', auth()->id())->where('status', 0)->get();
+            $leads = Customer::withStats()->where('user_id', auth()->id())->where('status', Customer::LEAD)->get();
             $plan = Planning::where('user_id', auth()->id())->get();
             $reminder = Reminder::where('user_id', auth()->id())->get();
             $report = [];

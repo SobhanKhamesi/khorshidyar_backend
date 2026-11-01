@@ -12,6 +12,7 @@ use App\Models\Reminder;
 use App\Models\User;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class CustomersController extends Controller
 {
@@ -28,22 +29,21 @@ class CustomersController extends Controller
 
     public function index()
     {
-        if (auth()->user()->role == User::KARSHENAS_FANI) {
-            $data = Customer::where('user_id', auth()->id())->whereIn('status', [Customer::CUSTOMER, Customer::TO])->orderbyDesc('created_at')->get();
-        } else {
-            $data = Customer::whereIn('status', [Customer::CUSTOMER, Customer::TO])->orderbyDesc('created_at')->get();
-        }
+        $data = Customer::withStats()
+            ->whereIn('status', [Customer::CUSTOMER, Customer::TO])
+            ->when(auth()->user()->role == User::KARSHENAS_FANI, fn($q) => $q->where('user_id', auth()->id()))
+            ->orderByDesc('created_at')
+            ->get();
 
         return $this->apiController->respondData($data);
     }
 
     public function getAllCustomersAndLeads()
     {
-        if (auth()->user()->role == User::KARSHENAS_FANI) {
-            $data = Customer::where('user_id', auth()->id())->orderby('created_at', 'DESC')->get();
-        } else {
-            $data = Customer::orderby('created_at', 'DESC')->get();
-        }
+        $data = Customer::withStats()
+            ->when(auth()->user()->role == User::KARSHENAS_FANI, fn($q) => $q->where('user_id', auth()->id()))
+            ->orderByDesc('created_at')
+            ->get();
 
         return $this->apiController->respondData($data);
     }
@@ -98,7 +98,7 @@ class CustomersController extends Controller
         $contactNumber1 = $request->input('contact_number1');
         $contactNumber2 = $request->input('contact_number2');
 
-        if ($contactNumber != null && Customer::where('contact_number', $contactNumber)->first()) {
+        if ($contactNumber != null && Customer::where('contact_number', $contactNumber)->exists()) {
             return $this->apiController->respondValidationError('مشتری با این شماره تلفن قبلا ثبت شده است');
         }
 
@@ -120,10 +120,13 @@ class CustomersController extends Controller
 
 
         $referrerId = null;
-        if ($request->has('referrer') && $request->input('referrer') != null)
+        $referrerPercent = null;
+        if ($request->has('referrer') && $request->input('referrer') != null){
             $referrerId = Referrer::findOrFail($request->input('referrer'))->id;
+            $referrerPercent = $this->apiHelper->referrerPercent($request);
+        }
 
-        $create = Customer::create([
+        $attributes = [
             'status' => Customer::CUSTOMER,
             'type' => $customerType,
             'birth_date' => $convertedBirthDate,
@@ -151,35 +154,30 @@ class CustomersController extends Controller
             'description' => $this->apiHelper->getRealText($request, 'description'),
             'category_id' => $categoryId,
             'referrer_id' => $referrerId,
+            'referrer_percent' => $referrerPercent,
             'user_id' => auth()->id()
-        ]);
+        ];
 
+        $create = DB::transaction(function () use ($request, $attributes, $convertedBirthDate) {
+            $create = Customer::create($attributes);
+            $this->savePersons($create, $request->input('persons'));
 
-        foreach ($request->input('persons') as $item) {
-            $create->persons()->create([
-                'gender' => $item['gender'],
-                'name' => $this->apiHelper->getRealTextRare($item, 'name'),
-                'contact_number' => $this->apiHelper->getRealTextRare($item, 'contact_number'),
-                'position' => $this->apiHelper->getRealTextRare($item, 'position'),
-                'disc' => $this->apiHelper->getRealTextRare($item, 'disc'),
-                'whatsapp' => $this->apiHelper->getRealTextRare($item, 'whatsapp'),
-                'email' => $this->apiHelper->getRealTextRare($item, 'email'),
-                'user_id' => auth()->id()
-            ]);
-        }
+            // در صورتی که تاریخ تولد ثبت شده باشد، یادآوری تولد برای آن به‌صورت خودکار ساخته می‌شود
+            if ($convertedBirthDate) {
+                Reminder::create([
+                    'title' => 'تولد ' . $create->fullName,
+                    'date' => Reminder::nextYearlyOccurrence($convertedBirthDate),
+                    'status' => Reminder::ACTIVE,
+                    'type' => Reminder::TYPE_BIRTHDAY,
+                    'customer_id' => $create->id,
+                    'user_id' => auth()->id(),
+                ]);
+            }
 
-        // در صورتی که تاریخ تولد ثبت شده باشد، یادآوری تولد برای آن به‌صورت خودکار ساخته می‌شود
-        if ($convertedBirthDate) {
-            Reminder::create([
-                'title' => 'تولد ' . $create->fullName,
-                'date' => Reminder::nextYearlyOccurrence($convertedBirthDate),
-                'status' => Reminder::ACTIVE,
-                'type' => Reminder::TYPE_BIRTHDAY,
-                'customer_id' => $create->id,
-                'user_id' => auth()->id(),
-            ]);
-        }
+            return $create;
+        });
 
+        
         if ($create and $create instanceof Customer) {
             return $this->apiController->respondCreated();
         } else {
@@ -251,7 +249,7 @@ class CustomersController extends Controller
         $contactNumber1 = $request->input('contact_number1');
         $contactNumber2 = $request->input('contact_number2');
 
-        if ($contactNumber != null && Customer::where('contact_number', $contactNumber)->get()->except($data->id)->first()) {
+        if ($contactNumber != null && Customer::where('contact_number', $contactNumber)->where('id', '!=', $data->id)->exists()) {
             return $this->apiController->respondValidationError('مشتری با این شماره تلفن قبلا ثبت شده است');
         }
 
@@ -272,10 +270,13 @@ class CustomersController extends Controller
         }
 
         $referrerId = null;
-        if ($request->has('referrer') && $request->input('referrer') != null)
+        $referrerPercent = null;
+        if ($request->has('referrer') && $request->input('referrer') != null){
             $referrerId = Referrer::findOrFail($request->input('referrer'))->id;
+            $referrerPercent = $this->apiHelper->referrerPercent($request);
+        }
 
-        $update = $data->update([
+        $attributes = [
             'category_id' => $categoryId,
             'type' => $customerType,
             'birth_date' => $convertedBirthDate,
@@ -301,13 +302,29 @@ class CustomersController extends Controller
             'job_address' => $this->apiHelper->getRealText($request, 'job_address'),
             'description' => $this->apiHelper->getRealText($request, 'description'),
             'referrer_id' => $referrerId,
-        ]);
+            'referrer_percent' => $referrerPercent,
+        ];
 
+        $update = DB::transaction(function () use ($data, $attributes, $request) {
+            $update = $data->update($attributes);
 
-        $data->persons()->delete();
+            $data->persons()->delete();
+            $this->savePersons($data, $request->input('persons'));
 
-        foreach ($request->input('persons') as $item) {
-            $data->persons()->create([
+            return $update;
+        });
+
+        if ($update) {
+            return $this->apiController->respondUpdated();
+        } else {
+            return $this->apiController->respondInternalError();
+        }
+    }
+
+    private function savePersons(Customer $customer, ?array $persons): void
+    {
+        foreach ($persons ?? [] as $item) {
+            $customer->persons()->create([
                 'gender' => $item['gender'],
                 'name' => $this->apiHelper->getRealTextRare($item, 'name'),
                 'contact_number' => $this->apiHelper->getRealTextRare($item, 'contact_number'),
@@ -317,16 +334,7 @@ class CustomersController extends Controller
                 'email' => $this->apiHelper->getRealTextRare($item, 'email'),
                 'user_id' => auth()->id()
             ]);
-
         }
-
-        if ($update) {
-            return $this->apiController->respondUpdated();
-        } else {
-            return $this->apiController->respondInternalError();
-        }
-
-
     }
 
 
@@ -336,20 +344,7 @@ class CustomersController extends Controller
         if (auth()->user()->role === User::KARSHENAS_FANI && $data->user_id !== auth()->user()->id)
             return $this->apiController->respondForbidden();
 
-        $data->calls()->delete();
-        $data->persons()->delete();
-        foreach ($data->automations()->get() as $automation) {
-            $automation->orders()->delete();
-            $automation->comments()->delete();
-            $automation->delete();
-        }
-        foreach ($data->tickets()->get() as $ticket) {
-            foreach ($ticket->comments()->get() as $comment)
-                $comment->delete();
-            $ticket->delete();
-        }
-        $data->sms()->delete();
-        if ($data->delete()) {
+        if ($data->deleteWithRelations()) {
             return $this->apiController->respondDeleted();
         } else {
             return $this->apiController->respondInternalError();
@@ -379,7 +374,7 @@ class CustomersController extends Controller
 
         $contactNumber = $request->input('contact_number');
 
-        if ($contactNumber != null && Customer::where('contact_number', $contactNumber)->first()) {
+        if ($contactNumber != null && Customer::where('contact_number', $contactNumber)->exists()) {
             return $this->apiController->respondValidationError('مشتری با این شماره تلفن قبلا ثبت شده است');
         }
 

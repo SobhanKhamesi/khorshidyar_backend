@@ -28,7 +28,7 @@ class DailyReportItem extends Model
 
     public function report()
     {
-        return $this->hasOne(DailyReport::class);
+        return $this->belongsTo(DailyReport::class, 'report_id');
     }
 
 }

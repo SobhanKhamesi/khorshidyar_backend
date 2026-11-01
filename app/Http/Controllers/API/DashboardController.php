@@ -11,13 +11,16 @@ use App\Models\Customer;
 use App\Models\CustomerCategory;
 use App\Models\FailureCategory;
 use App\Models\Order;
-use App\Models\Source;
+use App\Models\Product;
 use App\Models\SourceCategory;
 use App\Models\User;
 use Carbon\Carbon;
 use Hekmatinasser\Verta\Verta;
-use Illuminate\Http\Request;
 
+/**
+ * کوئری‌های گروهی این کنترلر با toBase اجرا می‌شوند تا مدل‌ها و روابط $with آن‌ها
+ * بی‌دلیل ساخته و بارگذاری نشوند؛ عناوین هم با یک کوئری (pluck) گرفته می‌شوند نه find در حلقه.
+ */
 class DashboardController extends Controller
 {
 
@@ -30,43 +33,46 @@ class DashboardController extends Controller
         $this->apiHelper = $apiHelper;
     }
 
+    private function isTechnicalExpert(): bool
+    {
+        return auth()->user()->role === User::KARSHENAS_FANI;
+    }
 
     public function getWidgets()
     {
-        if (auth()->user()->role === User::KARSHENAS_FANI) {
-            $data = [
-                'customers_count' => Customer::where('user_id', auth()->id())->whereIn('status', [Customer::CUSTOMER, Customer::TO])->count(),
-                'leads_count' => Customer::where('user_id', auth()->id())->where('status', Customer::LEAD)->count(),
-                'opportunities_count' => Customer::where('user_id', auth()->id())->where('status', Customer::OPPORTUNITY)->count(),
-                'call_tracking_count' => Call::where('user_id', auth()->id())->count(),
-                'successful_sales' => Automation::where('user_id', auth()->id())->where('status', 5)->count(),
-                'price_successful_sales' => Automation::where('user_id', auth()->id())->where('status', 5)->sum('final_price'),
-                'unsuccessful_sales' => Automation::where('user_id', auth()->id())->where('status', Automation::FAILURE)->count(),
-                'price_unsuccessful_sales' => Automation::where('user_id', auth()->id())->where('status', Automation::FAILURE)->sum('final_price'),
-            ];
+        $onlyMine = $this->isTechnicalExpert();
+        $userId = auth()->id();
 
-        } else {
-            $data = [
-                'customers_count' => Customer::whereIn('status', [Customer::CUSTOMER, Customer::TO])->count(),
-                'leads_count' => Customer::where('status', Customer::LEAD)->count(),
-                'opportunities_count' => Customer::where('status', Customer::OPPORTUNITY)->count(),
-                'call_tracking_count' => Call::count(),
-                'successful_sales' => Automation::where('status', Automation::SUCCESS)->count(),
-                'price_successful_sales' => Automation::where('status', Automation::SUCCESS)->sum('final_price'),
-                'unsuccessful_sales' => Automation::where('status', Automation::FAILURE)->count(),
-                'price_unsuccessful_sales' => Automation::where('status', Automation::FAILURE)->sum('final_price'),
+        $customers = Customer::query()->toBase()
+            ->when($onlyMine, fn($q) => $q->where('user_id', $userId))
+            ->selectRaw('status, count(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
 
-            ];
-        }
+        $sales = Automation::query()->toBase()
+            ->when($onlyMine, fn($q) => $q->where('user_id', $userId))
+            ->whereIn('status', [Automation::SUCCESS, Automation::FAILURE])
+            ->selectRaw('status, count(*) as total, sum(final_price) as price')
+            ->groupBy('status')
+            ->get()
+            ->keyBy('status');
+
+        $data = [
+            'customers_count' => (int)($customers[Customer::CUSTOMER] ?? 0) + (int)($customers[Customer::TO] ?? 0),
+            'leads_count' => (int)($customers[Customer::LEAD] ?? 0),
+            'opportunities_count' => (int)($customers[Customer::OPPORTUNITY] ?? 0),
+            'call_tracking_count' => Call::query()->when($onlyMine, fn($q) => $q->where('user_id', $userId))->count(),
+            'successful_sales' => (int)($sales[Automation::SUCCESS]->total ?? 0),
+            'price_successful_sales' => $sales[Automation::SUCCESS]->price ?? 0,
+            'unsuccessful_sales' => (int)($sales[Automation::FAILURE]->total ?? 0),
+            'price_unsuccessful_sales' => $sales[Automation::FAILURE]->price ?? 0,
+        ];
 
         return $this->apiController->respondData($data);
-
     }
 
     public function getCharts()
     {
-
-
         $data = [
             'invoices' => $this->getInvoice(),
             'top_products' => $this->getTopProducts(),
@@ -81,100 +87,71 @@ class DashboardController extends Controller
         ];
 
         return $this->apiController->respondData($data);
-
     }
 
-
+    // تعداد فروش‌های موفق ۳۰ روز اخیر به تفکیک روز
     public function getInvoice()
     {
+        $createdDates = Automation::query()->toBase()
+            ->where('status', Automation::SUCCESS)
+            ->whereNotNull('final_price')
+            ->whereDate('created_at', '>=', Carbon::now()->subDays(30))
+            ->pluck('created_at');
 
-        $collectionProfitFilteredSales = Automation::where('status', 5)->whereDate('created_at', '>=', Carbon::now()->subDays(30))->get();
-
-        $dates = [];
-        $counts = [];
         $chartInvoice = [];
-
-
-        foreach ($collectionProfitFilteredSales as $item) {
-
-            if ($item->final_price != null) {
-
-                if (array_key_exists($item->jalali_date, $chartInvoice)) {
-                    $chartInvoice[$item->jalali_date]['count']++;
-                } else {
-                    $chartInvoice[$item->jalali_date] = [
-                        'count' => 1
-                    ];
-                }
-            }
+        foreach ($createdDates as $createdAt) {
+            $day = (new Verta($createdAt))->format('Y/m/d');
+            $chartInvoice[$day] = ($chartInvoice[$day] ?? 0) + 1;
         }
-
 
         ksort($chartInvoice);
 
-
-        foreach ($chartInvoice as $key => $val) {
-            if ($val['count'] > 0 || $val['count'] < 0) {
-                $dates[] = $key;
-                $counts[] = $val['count'];
-            }
-        }
-
-
         return [
-            'date' => $dates,
-            'count' => $counts
+            'date' => array_keys($chartInvoice),
+            'count' => array_values($chartInvoice),
         ];
     }
 
     public function getCustomersCategories()
     {
-        if (auth()->user()->role === User::KARSHENAS_FANI) {
-            $collectionCustomersCategories = Customer::where('user_id', auth()->id())
-                ->groupBy('category_id')
-                ->selectRaw('count(*) as total,category_id')
-                ->orderbyDesc('total')
-                ->get();
-        } else {
-            $collectionCustomersCategories = Customer::groupBy('category_id')
-                ->selectRaw('count(*) as total,category_id')
-                ->orderbyDesc('total')
-                ->get();
-        }
+        $collection = Customer::query()->toBase()
+            ->when($this->isTechnicalExpert(), fn($q) => $q->where('user_id', auth()->id()))
+            ->groupBy('category_id')
+            ->selectRaw('count(*) as total, category_id')
+            ->orderByDesc('total')
+            ->get();
+
+        $titles = CustomerCategory::whereIn('id', $collection->pluck('category_id')->filter())->pluck('title', 'id');
 
         $category = [];
         $percent = [];
-
-        foreach ($collectionCustomersCategories as $collection) {
-            $categoryItem = CustomerCategory::find($collection->category_id);
-            if ($categoryItem) {
-                $category[] = $categoryItem->title;
-                $percent[] = (int)$collection->total;
+        foreach ($collection as $row) {
+            if (isset($titles[$row->category_id])) {
+                $category[] = $titles[$row->category_id];
+                $percent[] = (int)$row->total;
             }
         }
 
-
         return compact('category', 'percent');
-
     }
 
     public function getTopProducts()
     {
-
-        $collectionProducts = Order::
-            groupBy('product_id')
-            ->selectRaw('sum(count) as total,product_id')
-            ->orderbyDesc('total')
+        $collection = Order::query()->toBase()
+            ->groupBy('product_id')
+            ->selectRaw('sum(count) as total, product_id')
+            ->orderByDesc('total')
             ->take(5)
             ->get();
 
+        $names = Product::whereIn('id', $collection->pluck('product_id'))->pluck('name', 'id');
+
         $product = [];
         $count = [];
-
-        foreach ($collectionProducts as $collection) {
-            if ($collection->product) {
-                $product[] = $collection->product->name;
-                $count[] = $collection->total;
+        foreach ($collection as $row) {
+            if (isset($names[$row->product_id])) {
+                $product[] = $names[$row->product_id];
+                $count[] = $row->total;
             }
         }
 
@@ -186,100 +163,87 @@ class DashboardController extends Controller
 
     public function getSource()
     {
-        if (auth()->user()->role === User::KARSHENAS_FANI) {
-            $collectionCustomersSource = Customer::where('user_id', auth()->id())->groupBy('source_id')->selectRaw('count(*) as total,source_id')->orderby('total', 'DESC')->get();
-        } else {
-            $collectionCustomersSource = Customer::groupBy('source_id')->selectRaw('count(*) as total,source_id')->orderby('total', 'DESC')->get();
-        }
+        $collection = Customer::query()->toBase()
+            ->when($this->isTechnicalExpert(), fn($q) => $q->where('user_id', auth()->id()))
+            ->groupBy('source_id')
+            ->selectRaw('count(*) as total, source_id')
+            ->orderByDesc('total')
+            ->get();
+
+        $titles = SourceCategory::whereIn('id', $collection->pluck('source_id')->filter())->pluck('title', 'id');
 
         $source = [];
         $percent = [];
-
-        $all = $collectionCustomersSource->sum('total');
-
-
-        foreach ($collectionCustomersSource as $collection) {
-            $sourceItem = SourceCategory::find($collection->source_id);
-            if ($sourceItem) {
-                $source[] = $sourceItem->title;
-                $percent[] = (int)$collection->total;
+        foreach ($collection as $row) {
+            if (isset($titles[$row->source_id])) {
+                $source[] = $titles[$row->source_id];
+                $percent[] = (int)$row->total;
             }
         }
 
         return compact('source', 'percent');
     }
 
-
     public function getStatus()
     {
+        $list = Customer::query()->toBase()
+            ->when($this->isTechnicalExpert(), fn($q) => $q->where('user_id', auth()->id()))
+            ->whereBetween('created_at', [Carbon::now()->subDays(30), Carbon::now()])
+            ->groupBy(['user_id', 'lead_status'])
+            ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
+            ->get();
 
-        if (auth()->user()->role === User::KARSHENAS_FANI) {
-            $list = Customer::where('user_id', auth()->id())
-                ->whereBetween('created_at', [Carbon::now()->subDays(30), Carbon::now()])
-                ->groupBy(['user_id', 'lead_status'])
-                ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                ->get();
-        } else {
-            $list = Customer::whereBetween('created_at', [Carbon::now()->subDays(30), Carbon::now()])
-                ->groupBy(['user_id', 'lead_status'])
-                ->selectRaw('count(`lead_status`) as total, user_id, `lead_status`')
-                ->get();
-        }
+        return response()->json(['chartsData' => self::leadStatusChart($list)]);
+    }
 
-
-        $statusOptions = [
-            ['label' => 'تمایل به خرید', 'value' => 0],
-            ['label' => 'نیاز به پیگیری', 'value' => 1],
-            ['label' => 'عدم تمایل به خرید', 'value' => 2],
-            ['label' => 'عدم پاسخگویی', 'value' => 3],
-            ['label' => 'تماس گرفته نشد', 'value' => 4]
+    /**
+     * ساخت داده نمودار وضعیت سرنخ‌ها به تفکیک کاربر (مشترک با ChartsController)
+     */
+    public static function leadStatusChart($list): array
+    {
+        $statuses = [
+            0 => 'تمایل به خرید',
+            1 => 'نیاز به پیگیری',
+            2 => 'عدم تمایل به خرید',
+            3 => 'عدم پاسخگویی',
+            4 => 'تماس گرفته نشد',
         ];
 
-        $users = User::pluck('name', 'id')->toArray();
-        $statuses = array_column($statusOptions, 'label', 'value');
-
+        $users = User::whereIn('id', collect($list)->pluck('user_id')->unique())->pluck('name', 'id');
 
         $data = [];
+        foreach ($list as $row) {
+            $userName = $users[$row->user_id] ?? null;
+            if ($userName === null)
+                continue;
 
+            if (!isset($data[$userName]))
+                $data[$userName] = array_fill_keys(array_keys($statuses), 0);
 
-        foreach ($list as $collection) {
-            $userId = $collection->user_id;
-            $lead_status = $collection->lead_status;
-            $total = $collection->total;
-
-            if (!isset($data[$users[$userId]])) {
-                $data[$users[$userId]] = array_fill_keys(array_keys($statuses), 0);
-            }
-
-            $data[$users[$userId]][$lead_status] = $total;
+            $data[$userName][$row->lead_status] = $row->total;
         }
 
-
-        return response()->json(['chartsData' => $data]);
-
+        return $data;
     }
 
     public function getFailureCategories()
     {
-        $collectionFailureCategories = Automation::groupBy('failure_id')
-            ->selectRaw('count(*) as total,failure_id')
-            ->orderby('total', 'DESC')
+        $collection = Automation::query()->toBase()
+            ->groupBy('failure_id')
+            ->selectRaw('count(*) as total, failure_id')
+            ->orderByDesc('total')
             ->get();
+
+        $titles = FailureCategory::whereIn('id', $collection->pluck('failure_id')->filter())->pluck('title', 'id');
 
         $failure = [];
         $percent = [];
-
-        $all = $collectionFailureCategories->sum('total');
-
-
-        foreach ($collectionFailureCategories as $collection) {
-            $categoryItem = FailureCategory::find($collection->failure_id);
-            if ($categoryItem) {
-                $failure[] = $categoryItem->title;
-                $percent[] = (integer)$collection->total;
+        foreach ($collection as $row) {
+            if (isset($titles[$row->failure_id])) {
+                $failure[] = $titles[$row->failure_id];
+                $percent[] = (int)$row->total;
             }
         }
-
 
         return [
             'failure' => $failure,
@@ -289,21 +253,22 @@ class DashboardController extends Controller
 
     public function getBestCuctomer()
     {
-
-        $collectionCustomer = Automation::where('status', Automation::SUCCESS)
+        $collection = Automation::query()->toBase()
+            ->where('status', Automation::SUCCESS)
             ->groupBy('customer_id')
-            ->selectRaw('sum(final_price) as total,customer_id')
-            ->orderby('total', 'DESC')
+            ->selectRaw('sum(final_price) as total, customer_id')
+            ->orderByDesc('total')
             ->take(5)
             ->get();
 
+        $names = Customer::query()->toBase()->whereIn('id', $collection->pluck('customer_id'))->pluck('name', 'id');
+
         $customer = [];
         $count = [];
-
-        foreach ($collectionCustomer as $collection) {
-            if ($collection->customer) {
-                $customer[] = $collection->customer->name;
-                $count[] = $collection->total;
+        foreach ($collection as $row) {
+            if (isset($names[$row->customer_id])) {
+                $customer[] = $names[$row->customer_id];
+                $count[] = $row->total;
             }
         }
 
@@ -315,21 +280,22 @@ class DashboardController extends Controller
 
     public function getTopSeller()
     {
-
-        $collectionSeller = Automation::where('status', Automation::SUCCESS)
+        $collection = Automation::query()->toBase()
+            ->where('status', Automation::SUCCESS)
             ->groupBy('user_id')
-            ->selectRaw('sum(final_price) as total,user_id')
-            ->orderby('total', 'DESC')
+            ->selectRaw('sum(final_price) as total, user_id')
+            ->orderByDesc('total')
             ->take(5)
             ->get();
 
+        $names = User::whereIn('id', $collection->pluck('user_id'))->pluck('name', 'id');
+
         $user = [];
         $count = [];
-
-        foreach ($collectionSeller as $collection) {
-            if ($collection->user) {
-                $user[] = $collection->user->name;
-                $count[] = $collection->total;
+        foreach ($collection as $row) {
+            if (isset($names[$row->user_id])) {
+                $user[] = $names[$row->user_id];
+                $count[] = $row->total;
             }
         }
 
@@ -339,57 +305,49 @@ class DashboardController extends Controller
         ];
     }
 
-
+    // فقط برای مدیر محاسبه می‌شود
     public function getReport()
     {
+        if (auth()->user()->role !== User::ADMIN)
+            return null;
 
-        $collectionCalls = Call::groupBy('user_id')
+        $collection = Call::query()->toBase()
+            ->groupBy('user_id')
             ->selectRaw('COUNT(*) as total, user_id')
-            ->orderBy('total', 'DESC')
+            ->orderByDesc('total')
             ->get();
+
+        $names = User::whereIn('id', $collection->pluck('user_id'))->pluck('name', 'id');
 
         $call = [];
         $count = [];
-
-        foreach ($collectionCalls as $collection) {
-            $user = User::find($collection->user_id);
-            if ($user) {
-                $call[] = $user->name;
-                $count[] = $collection->total;
+        foreach ($collection as $row) {
+            if (isset($names[$row->user_id])) {
+                $call[] = $names[$row->user_id];
+                $count[] = $row->total;
             }
         }
 
-        if (auth()->user()->role === User::ADMIN)
-            return [
-                'call' => $call,
-                'count' => $count
-            ];
-
-        return null;
+        return [
+            'call' => $call,
+            'count' => $count
+        ];
     }
 
     public function getSalesSource()
     {
-        $collectionSalesSource = Automation::join('customers', 'automation.customer_id', '=', 'customers.id')
+        $collection = Automation::query()->toBase()
+            ->join('customers', 'automation.customer_id', '=', 'customers.id')
             ->join('source_categories', 'customers.source_id', '=', 'source_categories.id')
             ->where('automation.status', Automation::SUCCESS)
-            ->groupBy('customers.source_id')
+            ->groupBy('customers.source_id', 'source_categories.title')
             ->selectRaw('COUNT(*) as total, source_categories.title as title')
-            ->orderBy('total', 'DESC')
+            ->orderByDesc('total')
             ->get();
 
-        $salesSource = [];
-        $count = [];
-
-        foreach ($collectionSalesSource as $collection) {
-            $sourceTitle = $collection->title; // عنوان منبع را دریافت می‌کنیم
-            $salesSource[] = $sourceTitle;
-            $count[] = $collection->total;
-        }
-
         return [
-            'salesSource' => $salesSource,
-            'count' => $count
+            'salesSource' => $collection->pluck('title')->all(),
+            'count' => $collection->pluck('total')->all(),
         ];
     }
 

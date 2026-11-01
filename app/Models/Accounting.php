@@ -44,12 +44,12 @@ class Accounting extends Model
 
     public function customer()
     {
-        return $this->hasOne(Customer::class, 'id', 'customer_id');
+        return $this->belongsTo(Customer::class, 'customer_id')->withStats();
     }
 
     public function posBankAccount()
     {
-        return $this->hasOne(BankAccount::class, 'id', 'pos_bank_account_id');
+        return $this->belongsTo(BankAccount::class, 'pos_bank_account_id');
     }
 
     public function orders()

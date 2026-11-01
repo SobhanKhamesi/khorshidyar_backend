@@ -35,7 +35,7 @@ class Sms extends Model
         'jalali_created_at', 'SabtKonande', 'receiver_type_label'
     ];
 
-    public $with = ['customer', 'category'];
+    public $with = ['customer', 'category', 'user'];
 
     protected $fillable = [
         'send_to_all',
@@ -59,12 +59,12 @@ class Sms extends Model
 
     public function customer()
     {
-        return $this->hasOne(Customer::class, 'id', 'customer_id');
+        return $this->belongsTo(Customer::class, 'customer_id')->withStats();
     }
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     public function category()

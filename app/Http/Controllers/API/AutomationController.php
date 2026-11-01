@@ -9,14 +9,10 @@ use App\Models\Automation;
 use App\Models\AutomationHomeSurvey;
 use App\Models\AutomationIndustrialSurvey;
 use App\Models\AutomatonComment;
-use App\Models\Comment;
 use App\Models\Customer;
 use App\Models\FailureCategory;
-use App\Models\Product;
-use App\Models\Sms;
-use App\Models\SourceSms;
 use App\Models\User;
-use Carbon\Carbon;
+use App\Services\SmsService;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -25,24 +21,29 @@ class AutomationController extends Controller
 {
     private ApiController $apiController;
     private ApiHelper $apiHelper;
+    private SmsService $smsService;
 
-    public function __construct(ApiController $apiController, ApiHelper $apiHelper)
+    public function __construct(ApiController $apiController, ApiHelper $apiHelper, SmsService $smsService)
     {
         $this->apiController = $apiController;
         $this->apiHelper = $apiHelper;
+        $this->smsService = $smsService;
     }
 
     public function index($status)
     {
+        // پارامتر مسیر رشته است؛ بدون تبدیل، مقایسه با ثابت‌های عددی همیشه نابرابر بود
+        $status = (int)$status;
+
         $query = Automation::query()
-            ->withCount(['orders', 'contractItems', 'payments', 'cheques']);
+            ->withCount(['orders', 'contractItems', 'payments', 'cheques'])
+            ->where('status', $status)
+            ->orderByDesc('created_at');
 
         if (auth()->user()->role == User::KARSHENAS_FANI && $status !== Automation::SUCCESS && $status !== Automation::FAILURE)
-            $list = $query->where('user_id', auth()->id())->where('status', $status)->orderbyDesc('created_at')->get();
-        else
-            $list = $query->where('status', $status)->orderbyDesc('created_at')->get();
+            $query->where('user_id', auth()->id());
 
-        return $this->apiController->respondData($list);
+        return $this->apiController->respondData($query->get());
     }
 
 
@@ -61,13 +62,15 @@ class AutomationController extends Controller
 
         $customer = Customer::findOrFail($request->input('customer'));
         $expert = User::findOrFail($request->input('expert'));
+        $referrerPercent = $this->resolveReferrerPercent($request, $customer);
 
         $survey = $request->input('survey') ? json_decode($request->input('survey'), true) : null;
 
-        $automation = DB::transaction(function () use ($request, $customer, $survey, $expert) {
+        $automation = DB::transaction(function () use ($request, $customer, $survey, $expert, $referrerPercent) {
             $automation = Automation::create([
                 'status' => Automation::REQUEST,
                 'survey_type' => $request->input('surveyType'),
+                'referrer_percent' => $referrerPercent,
                 'user_id' => auth()->id(),
                 'customer_id' => $customer->id,
                 'expert_id' => $expert->id,
@@ -133,15 +136,14 @@ class AutomationController extends Controller
     }
 
 
+    // وجود محصولات قبلاً با قانون exists در validate بررسی شده است
     public function addOrder(array $orders, Automation $create)
     {
         $finalPrice = 0;
         $create->orders()->delete();
         foreach ($orders as $order) {
-            $product = Product::findOrFail($order['orderProductId']);
-
             $create->orders()->create([
-                'product_id' => $product->id,
+                'product_id' => $order['orderProductId'],
                 'price' => $order['orderPrice'],
                 'count' => $order['orderCount'],
             ]);
@@ -169,18 +171,16 @@ class AutomationController extends Controller
         $customer = Customer::findOrFail($request->input('customer'));
         $orders = $request->input('orders');
         $description = $request->input('description');
+        $referrerPercent = $this->resolveReferrerPercent($request, $customer);
 
-        $invoice_number = (Automation::query()
-                ->whereNotNull('invoice_number')
-                ->whereRaw('CAST(invoice_number AS UNSIGNED) >= 100')
-                ->whereRaw('CAST(invoice_number AS UNSIGNED) < 10000')
-                ->max(DB::raw('CAST(invoice_number AS UNSIGNED)')) ?? 99) + 1;
+        $automation = DB::transaction(function () use ($customer, $orders, $description, $referrerPercent) {
+            $invoice_number = Automation::nextInvoiceNumber();
 
-        $automation = DB::transaction(function () use ($customer, $orders, $description, $invoice_number) {
             $automation = Automation::create([
                 'status' => Automation::PRE_INVOICE,
                 'user_id' => auth()->id(),
                 'customer_id' => $customer->id,
+                'referrer_percent' => $referrerPercent,
                 'description' => $description,
             ]);
 
@@ -216,14 +216,10 @@ class AutomationController extends Controller
         $nextStatus = $automation->status + 1;
         $orders = $request->input('orders');
         $description = $request->input('description');
+        $referrerPercent = $this->resolveReferrerPercent($request, $automation->customer, $automation);
 
-        $invoice_number = (Automation::query()
-                ->whereNotNull('invoice_number')
-                ->whereRaw('CAST(invoice_number AS UNSIGNED) >= 100')
-                ->whereRaw('CAST(invoice_number AS UNSIGNED) < 10000')
-                ->max(DB::raw('CAST(invoice_number AS UNSIGNED)')) ?? 99) + 1;
-
-        DB::transaction(function () use ($automation, $orders, $nextStatus, $invoice_number, $description) {
+        DB::transaction(function () use ($automation, $orders, $nextStatus, $description, $referrerPercent) {
+            $invoice_number = Automation::nextInvoiceNumber();
             $finalPrice = $this->addOrder($orders, $automation);
 
             $automation->update([
@@ -231,6 +227,7 @@ class AutomationController extends Controller
                 'final_price' => $finalPrice,
                 'invoice_number' => $invoice_number,
                 'description' => $description,
+                'referrer_percent' => $referrerPercent,
             ]);
 
             if ($automation->customer->status === Customer::LEAD)
@@ -243,10 +240,13 @@ class AutomationController extends Controller
     public function success(Request $request)
     {
         $automation = Automation::findOrFail($request->input('id'));
-        $automation->update(['status' => Automation::SUCCESS]);
 
-        if ($automation->customer->status === Customer::LEAD || $automation->customer->status === Customer::OPPORTUNITY)
-            $automation->customer->update(['status' => Customer::CUSTOMER]);
+        DB::transaction(function () use ($automation) {
+            $automation->update(['status' => Automation::SUCCESS]);
+
+            if ($automation->customer->status === Customer::LEAD || $automation->customer->status === Customer::OPPORTUNITY)
+                $automation->customer->update(['status' => Customer::CUSTOMER]);
+        });
 
         if ($request->input("send_sms"))
             return $this->Sms($automation);
@@ -270,91 +270,22 @@ class AutomationController extends Controller
 
     public function Sms(Automation $automation)
     {
-        $smsTotalCount = 0;
-        $mobilesArray = [];
-
-        $sms = SourceSms::where('title', 'تشکر از خرید')->first();
+        $sms = $this->smsService->sendTemplateToCustomer('تشکر از خرید', $automation->customer);
         if (!$sms)
-            return $this->apiController->respondError("قالب sms برای 'نظرسنجی' ثبت نشده است.");
+            return $this->apiController->respondError("قالب sms برای 'تشکر از خرید' ثبت نشده است.");
 
-        $customer = $automation->customer;
-        $mobile = $customer->contact_number;
-        $name = $customer->name;
-        $content = '';
-        if ($customer->type == 0) {
-            $content = 'آقای ';
-        } elseif ($customer->type == 1) {
-            $content = 'خانم ';
-        }
-        $content .= $name;
-        $content .= "\n";
-        $content .= "\n";
-        $content .= $sms->description;
-
-        $urlSMS = "https://RayganSMS.com/SendMessageWithUrl.ashx?Username=" . urlencode(env('TREZ_USERNAME')) . "&Password=" . urlencode(env('TREZ_PASSWORD')) . "&PhoneNumber=" . urlencode(env('TREZ_NUMBER')) . "&MessageBody=" . urlencode($content) . "&RecNumber=" . urlencode($mobile) . "&Smsclass=1";
-        if (file_get_contents($urlSMS)) {
-            $mobilesArray[] = $mobile;
-            $smsTotalCount++;
-        }
-
-        $create = Sms::create([
-            'receivers' => $mobilesArray,
-            'count' => $smsTotalCount,
-            'body' => $content,
-            'sent_at' => Carbon::now(),
-            'user_id' => auth()->id()
-        ]);
-        if ($create) {
-            return $this->apiController->respondCreated('با موفقیت پیامک ارسال شد');
-        } else {
-            return $this->apiController->respondInternalError();
-        }
+        return $this->apiController->respondCreated('با موفقیت پیامک ارسال شد');
     }
 
     public function SmsSurveys(Automation $automation)
     {
-        $smsTotalCount = 0;
-        $mobilesArray = [];
+        $suffix = "\n" . 'تاریخ بازدید : ' . $automation->jalali_visit_date;
 
-        $sms = SourceSms::where('title', 'فرم بازدید')->first();
+        $sms = $this->smsService->sendTemplateToCustomer('فرم بازدید', $automation->customer, $suffix);
         if (!$sms)
             return $this->apiController->respondError("قالب sms برای 'فرم بازدید' ثبت نشده است.");
 
-        $customer = $automation->customer;
-        $mobile = $customer->contact_number;
-        $name = $customer->name;
-        $content = '';
-        if ($customer->type == 0) {
-            $content = 'آقای ';
-        } elseif ($customer->type == 1) {
-            $content = 'خانم ';
-        }
-        $content .= $name;
-        $content .= "\n";
-        $content .= "\n";
-        $content .= $sms->description;
-        $content .= "\n";
-        $content .= 'تاریخ بازدید : ';
-        $content .= $automation->jalali_visit_date;
-
-        $urlSMS = "https://RayganSMS.com/SendMessageWithUrl.ashx?Username=" . urlencode(env('TREZ_USERNAME')) . "&Password=" . urlencode(env('TREZ_PASSWORD')) . "&PhoneNumber=" . urlencode(env('TREZ_NUMBER')) . "&MessageBody=" . urlencode($content) . "&RecNumber=" . urlencode($mobile) . "&Smsclass=1";
-        if (file_get_contents($urlSMS)) {
-            $mobilesArray[] = $mobile;
-            $smsTotalCount++;
-        }
-
-        $create = Sms::create([
-            'receivers' => $mobilesArray,
-            'count' => $smsTotalCount,
-            'body' => $content,
-            'sent_at' => Carbon::now(),
-            'user_id' => auth()->id()
-        ]);
-        if ($create) {
-            return $this->apiController->respondCreated('با موفقیت پیامک ارسال شد');
-        } else {
-            return $this->apiController->respondInternalError();
-        }
+        return $this->apiController->respondCreated('با موفقیت پیامک ارسال شد');
     }
 
 
@@ -362,7 +293,7 @@ class AutomationController extends Controller
     {
         $failure = null;
         if ($request->input('failure') !== null)
-            $failure = FailureCategory::find($request->input('failure'))->id;
+            $failure = FailureCategory::findOrFail($request->input('failure'))->id;
 
         $data = Automation::findorFail($request->input('id'));
         $data->update([
@@ -374,7 +305,8 @@ class AutomationController extends Controller
 
     public function show(Automation $automation)
     {
-        $automation->load(['homeSurvey.gasCoolers', 'industrialSurvey.mainConsumers', 'orders.product']);
+        // orders.product از قبل در $with مدل بارگذاری شده است
+        $automation->load(['homeSurvey.gasCoolers', 'industrialSurvey.mainConsumers']);
         return $this->apiController->respondData($automation);
     }
 
@@ -392,14 +324,20 @@ class AutomationController extends Controller
         $automation = Automation::findOrFail($request->input('id'));
         $customer = Customer::findOrFail($request->input('customer'));
         $expert = User::findOrFail($request->input('expert'));
+        // اگر مشتری اتوماسیون عوض شده باشد، درصد قبلی متعلق به مشتری دیگر است و نباید حفظ شود
+        $referrerPercent = $this->resolveReferrerPercent(
+            $request, $customer, $automation->customer_id === $customer->id ? $automation : null
+        );
 
         $survey = $request->input('survey') ? json_decode($request->input('survey'), true) : null;
 
-        DB::transaction(function () use ($request, $automation, $customer, $survey, $expert) {
+        DB::transaction(function () use ($request, $automation, $customer, $survey, $expert, $referrerPercent) {
             $automation->update([
-                'date' => Verta::parse($request->input('date'))->datetime(),
+                // ستون date در جدول وجود ندارد؛ تاریخ بازدید در visit_date ذخیره می‌شود
+                'visit_date' => Verta::parse($request->input('date'))->datetime(),
                 'customer_id' => $customer->id,
                 'expert_id' => $expert->id,
+                'referrer_percent' => $referrerPercent,
                 'description' => $request->input('description'),
                 'survey_type' => $request->input('surveyType'),
             ]);
@@ -408,6 +346,46 @@ class AutomationController extends Controller
         });
 
         return $this->apiController->respondUpdated();
+    }
+
+    /**
+     * تغییر درصد معرف فقط برای همین پروژه؛ در هر مرحله‌ای از اتوماسیون قابل انجام است
+     * و روی درصد تعریف شده برای مشتری یا پروژه‌های دیگر اثری ندارد.
+     */
+    public function referrerPercent(Request $request)
+    {
+        $this->validate($request, ['id' => 'required']);
+
+        $automation = Automation::findOrFail($request->input('id'));
+        if (!$automation->customer?->referrer_id)
+            return $this->apiController->respondError('برای مشتری این پروژه معرفی ثبت نشده است');
+
+        $percent = $this->apiHelper->referrerPercent($request);
+        if ($percent === null)
+            return $this->apiController->respondError('درصد معرف را وارد نمایید');
+
+        $automation->update(['referrer_percent' => $percent]);
+
+        return $this->apiController->respondUpdated('درصد معرف این پروژه ویرایش شد', [
+            'referrer_percent' => $automation->referrer_percent,
+            'referrer_income' => $automation->referrer_income,
+        ]);
+    }
+
+    /**
+     * درصد معرف یک پروژه:
+     * - اگر مشتری معرف ندارد: null
+     * - اگر درصد در درخواست ارسال شده: همان مقدار (فقط برای این پروژه)
+     * - در غیر این صورت: درصد فعلی پروژه، و برای پروژه جدید درصد تعریف شده روی مشتری (در لحظه ایجاد ثابت می‌شود)
+     */
+    private function resolveReferrerPercent(Request $request, Customer $customer, ?Automation $automation = null): ?int
+    {
+        $percent = $this->apiHelper->referrerPercent($request);
+
+        if (!$customer->referrer_id)
+            return null;
+
+        return $percent ?? $automation?->referrer_percent ?? $customer->referrer_percent;
     }
 
     public function comments(Request $request)
@@ -442,16 +420,11 @@ class AutomationController extends Controller
     {
 
         $data = AutomatonComment::findOrFail($request->input('id'));
-        if ($data) {
-            if ($data->delete()) {
-                return $this->apiController->respondDeleted();
-            } else {
-                return $this->apiController->respondInternalError();
-            }
-        } else {
-            return $this->apiController->respondNotFound();
-        }
 
+        if ($data->delete())
+            return $this->apiController->respondDeleted();
+
+        return $this->apiController->respondInternalError();
     }
 
 

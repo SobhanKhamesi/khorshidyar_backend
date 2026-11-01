@@ -31,4 +31,16 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // سامانه پیامک رایگان اس ام اس
+    'raygan_sms' => [
+        'url' => env('RAYGAN_SMS_URL', 'https://RayganSMS.com/SendMessageWithUrl.ashx'),
+        'username' => env('TREZ_USERNAME'),
+        'password' => env('TREZ_PASSWORD'),
+        'number' => env('TREZ_NUMBER'),
+        'timeout' => env('RAYGAN_SMS_TIMEOUT', 10),
+    ],
+
+    // آدرس فرانت‌اند (برای لینک‌هایی که در پیامک ارسال می‌شوند)
+    'frontend_url' => env('FRONTEND_URL', 'https://khrshdyar.ir'),
+
 ];

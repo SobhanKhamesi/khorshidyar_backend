@@ -2,10 +2,9 @@
 
 namespace App\Models;
 
-use App\Traits\Uuids;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Morilog\Jalali\Jalalian;
 
@@ -40,24 +39,44 @@ class Product extends Model
 
     public $with = ['unit'];
 
+    // مقادیر کمکی scopeWithStats
+    protected $hidden = ['reserved_count', 'sold_orders_count'];
+
+    /**
+     * محاسبه موجودی، تعداد فروش و ثبت کننده در همان کوئری اصلی به جای ۳ کوئری برای هر محصول.
+     * شرط‌ها بدون binding هستند تا در کنار pluck/select/exists امن باشند.
+     */
+    public function scopeWithStats(Builder $query): Builder
+    {
+        return $query
+            ->with('user')
+            ->withSum(['orders as reserved_count' => fn($q) => $q->whereHas(
+                'automation', fn($a) => $a->whereRaw('automation.status <> ' . Automation::FAILURE)
+            )], 'count')
+            ->withSum(['orders as sold_orders_count' => fn($q) => $q->whereHas(
+                'automation', fn($a) => $a->whereRaw('automation.status = ' . Automation::SUCCESS)
+            )], 'count');
+    }
 
     public function getInventoryAttribute()
     {
-        $notAvailableInStock = Order::where('product_id', $this->id)
-            ->whereHas('automation', function ($query) {
-                $query->whereNot('status', Automation::FAILURE);
-            })
-            ->sum('count');
+        $notAvailableInStock = array_key_exists('reserved_count', $this->attributes)
+            ? ($this->attributes['reserved_count'] ?? 0)
+            : Order::where('product_id', $this->id)
+                ->whereHas('automation', fn($query) => $query->whereNot('status', Automation::FAILURE))
+                ->sum('count');
+
         return $this->first_inventory - $notAvailableInStock;
     }
 
 
     public function getSoldCountAttribute()
     {
+        if (array_key_exists('sold_orders_count', $this->attributes))
+            return $this->attributes['sold_orders_count'] ?? 0;
+
         return Order::where('product_id', $this->id)
-            ->whereHas('automation', function ($query) {
-                $query->where('status', Automation::SUCCESS);
-            })
+            ->whereHas('automation', fn($query) => $query->where('status', Automation::SUCCESS))
             ->sum('count');
     }
     public function getJalaliCreatedAttribute()
@@ -69,11 +88,11 @@ class Product extends Model
     }
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
     public function getSabtKonandeAttribute()
     {
-        return $this->user->name;
+        return $this->user?->name;
     }
     public function orders()
     {
@@ -82,12 +101,12 @@ class Product extends Model
 
     public function unit()
     {
-        return $this->hasOne(Unit::class, 'id', 'unit_id');
+        return $this->belongsTo(Unit::class, 'unit_id');
     }
 
     public function category()
     {
-        return $this->hasOne(ProductCategory::class, 'id', 'category_id');
+        return $this->belongsTo(ProductCategory::class, 'category_id');
     }
 
 

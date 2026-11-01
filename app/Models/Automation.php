@@ -7,6 +7,7 @@ use Hekmatinasser\Verta\Verta;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 class Automation extends Model
 {
@@ -36,6 +37,7 @@ class Automation extends Model
         'status' ,  // وضعیت
         'user_id' ,  // ثبت کننده
         'customer_id' ,  // مشتری یا سرنخ
+        'referrer_percent' ,  // درصد معرف از این فروش
         'expert_id' ,  // کارشناس فنی
         'address' ,  // آدرس
         'invoice_number' ,  // شماره فاکتور
@@ -48,8 +50,22 @@ class Automation extends Model
         'survey_type' ,  // نوع بازدید
         'description' ,
     ];
-    public $with = ['customer', 'orders', 'expert','failure','comments','contractItems','payments','cheques'];
-    public $appends = ['jalali_date', 'jalali_visit_date', 'sabtKonande'];
+    public $with = ['customer', 'orders', 'expert', 'failure', 'comments', 'contractItems', 'payments', 'cheques', 'user'];
+    public $appends = ['jalali_date', 'jalali_visit_date', 'sabtKonande', 'referrer_income'];
+
+    protected $casts = [
+        'referrer_percent' => 'integer',
+    ];
+
+    // سهم معرف از این پروژه (تومان) = مبلغ نهایی × درصد معرف همین پروژه
+    public function getReferrerIncomeAttribute()
+    {
+        if ($this->referrer_percent === null || $this->final_price === null)
+            return null;
+
+        return (int)round((float)$this->final_price * $this->referrer_percent / 100);
+    }
+
 
     public function homeSurvey()  // فرم بازدید خانگی
     {
@@ -63,26 +79,27 @@ class Automation extends Model
 
     public function getSabtKonandeAttribute()
     {
-        return $this->user->name;
+        return $this->user?->name;
     }
 
     public function failure()
     {
-        return $this->hasOne(FailureCategory::class, 'id', 'failure_id');
+        return $this->belongsTo(FailureCategory::class, 'failure_id');
     }
+
     public function customer()
     {
-        return $this->hasOne(Customer::class, 'id', 'customer_id');
+        return $this->belongsTo(Customer::class, 'customer_id')->withStats();
     }
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     public function expert()  // کارشناس فنی
     {
-        return $this->hasOne(User::class, 'id', 'expert_id');
+        return $this->belongsTo(User::class, 'expert_id');
     }
     public function comments()
     {
@@ -112,6 +129,22 @@ class Automation extends Model
     {
         $jalaliDate = new Verta($this->created_at);
         return $jalaliDate->format('Y/m/d ساعت H:i');
+    }
+
+    /**
+     * شماره فاکتور بعدی (بازه ۱۰۰ تا ۹۹۹۹). باید داخل تراکنش صدا زده شود تا
+     * قفل ردیف‌ها مانع از ثبت شماره تکراری در درخواست‌های هم‌زمان شود.
+     */
+    public static function nextInvoiceNumber(): int
+    {
+        $max = static::query()
+            ->withoutEagerLoads()
+            ->whereNotNull('invoice_number')
+            ->whereRaw('CAST(invoice_number AS UNSIGNED) between 100 and 9999')
+            ->lockForUpdate()
+            ->max(DB::raw('CAST(invoice_number AS UNSIGNED)'));
+
+        return ($max ?? 99) + 1;
     }
 
     public function getJalaliVisitDateAttribute()

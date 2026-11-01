@@ -41,12 +41,12 @@ class Call extends Model
 
     public $appends = ['jalali_full_date', 'jalali_re_follow_full_date','jalali_created',
         'jalali_re_follow_date', 'jalali_re_follow_time', 'jalali_date', 'SabtKonande'];
-    public $with = ['customer'];
+    public $with = ['customer', 'user'];
 
 
     public function customer()
     {
-        return $this->hasOne(Customer::class, 'id', 'customer_id');
+        return $this->belongsTo(Customer::class, 'customer_id')->withStats();
     }
 
 
@@ -100,12 +100,12 @@ class Call extends Model
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
 
     public function getSabtKonandeAttribute()
     {
-        return $this->user->name;
+        return $this->user?->name;
     }
 
     public function getJalaliCreatedAttribute()

@@ -163,6 +163,8 @@ Route::middleware('auth:sanctum')->group(callback: function () {
         Route::post('store', [ReferrerController::class, 'store']);
         Route::post('update/{referrer}', [ReferrerController::class, 'update']);
         Route::post('destroy/{referrer}', [ReferrerController::class, 'destroy']);
+        Route::get('introduces/details/{customer}', [ReferrerController::class, 'introducesDetails']);
+        Route::post('introduces/percent/{customer}', [ReferrerController::class, 'updatePercent']);
         Route::get('introduces/{referrer}', [ReferrerController::class, 'introduces']);
     });
 
@@ -242,6 +244,7 @@ Route::middleware('auth:sanctum')->group(callback: function () {
         Route::post('accept', [AutomationController::class, 'accept']);
         Route::post('quick-store', [AutomationController::class, 'quickStore']);
         Route::post('confirm-contract', [AutomationController::class, 'confirmContract']);
+        Route::post('referrer-percent', [AutomationController::class, 'referrerPercent']);
         Route::post('success', [AutomationController::class, 'success']);
         Route::get('cancel/{automation}', [AutomationController::class, 'cancel']);
         Route::post('store', [AutomationController::class, 'store']);
@@ -296,8 +299,6 @@ Route::middleware('auth:sanctum')->group(callback: function () {
 
         Route::group(['prefix' => 'activities'], function () {
             Route::post('targeting', [ChartsController::class, 'getTargeting']);
-            Route::get('successful', [ChartsController::class, 'getSuccessful']);
-            Route::post('user', [ChartsController::class, 'getUser']);
             Route::post('report', [ChartsController::class, 'getReport']);
         });
 

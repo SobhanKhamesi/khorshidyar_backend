@@ -6,10 +6,9 @@ use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
 use App\Models\Reminder;
-use App\Models\Sms;
 use App\Models\SourceSms;
-use Carbon\Carbon;
 use Hekmatinasser\Verta\Verta;
+use App\Services\SmsService;
 use Illuminate\Http\Request;
 
 class RemindersController extends Controller
@@ -134,23 +133,9 @@ class RemindersController extends Controller
             return 'ابتدا قالب پیامک «تبریک تولد» را در تنظیمات پیامک ثبت نمایید';
         }
 
-        $content = ($customer->type == 0 ? 'آقای ' : ($customer->type == 1 ? 'خانم ' : '')) . $customer->name;
-        $content .= "\n";
-        $content .= $sms->description;
+        $content = $customer->greeting_name . "\n" . $sms->description;
 
-        $mobile = $customer->contact_number;
-        $urlSMS = "https://RayganSMS.com/SendMessageWithUrl.ashx?Username=" . urlencode(env('TREZ_USERNAME')) . "&Password=" . urlencode(env('TREZ_PASSWORD')) . "&PhoneNumber=" . urlencode(env('TREZ_NUMBER')) . "&MessageBody=" . urlencode($content) . "&RecNumber=" . urlencode($mobile) . "&Smsclass=1";
-
-        $sent = @file_get_contents($urlSMS);
-
-        Sms::create([
-            'receivers' => $sent ? [$mobile] : [],
-            'count' => $sent ? 1 : 0,
-            'body' => $content,
-            'sent_at' => Carbon::now(),
-            'user_id' => auth()->id(),
-            'customer_id' => $customer->id,
-        ]);
+        $sent = app(SmsService::class)->sendAndLog($customer, $content)->count > 0;
 
         $reminder->update(['birthday_sms_sent' => true]);
 

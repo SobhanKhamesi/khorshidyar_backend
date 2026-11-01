@@ -24,7 +24,7 @@ class ProductsController extends Controller
 
     public function index()
     {
-        $data = Product::orderby('created_at', 'DESC')->get();
+        $data = Product::withStats()->orderby('created_at', 'DESC')->get();
         return $this->apiController->respondData($data);
     }
 

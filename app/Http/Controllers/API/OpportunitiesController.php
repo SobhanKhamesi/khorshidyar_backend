@@ -26,9 +26,9 @@ class OpportunitiesController extends Controller
     public function index()
     {
         if (auth()->user()->role === User::KARSHENAS_FANI) {
-            $data = Customer::where('status', Customer::OPPORTUNITY)->where('user_id', auth()->id())->orderbyDesc('created_at')->get();
+            $data = Customer::withStats()->where('status', Customer::OPPORTUNITY)->where('user_id', auth()->id())->orderbyDesc('created_at')->get();
         } else {
-            $data = Customer::where('status', Customer::OPPORTUNITY)->orderbyDesc('created_at')->get();
+            $data = Customer::withStats()->where('status', Customer::OPPORTUNITY)->orderbyDesc('created_at')->get();
         }
         return $this->apiController->respondData($data);
 

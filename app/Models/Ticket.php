@@ -51,7 +51,7 @@ class Ticket extends Model
     }
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
     public function attachments()
     {
@@ -59,12 +59,12 @@ class Ticket extends Model
     }
     public function customer()
     {
-        return $this->hasOne(Customer::class, 'id', 'customer_id');
+        return $this->belongsTo(Customer::class, 'customer_id')->withStats();
     }
 
     public function user1()
     {
-        return $this->hasOne(User::class, 'id', 'userId');
+        return $this->belongsTo(User::class, 'userId');
     }
 
     public function getSabtKonandeAttribute()

@@ -96,7 +96,7 @@ class InstallerAppointment extends Model
 
     public function customer()
     {
-        return $this->belongsTo(Customer::class);
+        return $this->belongsTo(Customer::class)->withStats();
     }
 
     public function automation()

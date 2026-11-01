@@ -9,6 +9,7 @@ use App\Models\Customer;
 use App\Models\Sms;
 use App\Models\User;
 use Carbon\Carbon;
+use App\Services\SmsService;
 use Illuminate\Http\Request;
 
 class SmsController extends Controller
@@ -94,7 +95,7 @@ class SmsController extends Controller
         if ($type === Sms::TYPE_SPECIFIC) {
             $ids = collect($receivers)->pluck('id')->filter()->all();
 
-            return Customer::whereIn('id', $ids)->get();
+            return Customer::query()->withoutEagerLoads()->whereIn('id', $ids)->get(['id', 'type', 'contact_number']);
         }
 
         $query = Customer::query();
@@ -115,45 +116,20 @@ class SmsController extends Controller
             $query->where('category_id', $categoryId);
         }
 
-        return $query->get();
+        return $query->withoutEagerLoads()->get(['id', 'type', 'contact_number']);
     }
 
+    // ارسال گروهی به‌صورت هم‌زمان (به جای یک درخواست HTTP پشت سر هم برای هر مشتری)
     private function sendToCustomers($customers, string $body): array
     {
-        $mobilesArray = [];
-        $smsTotalCount = 0;
+        $mobiles = $customers
+            ->filter(fn($customer) => (int)$customer->type !== Customer::JURIDICAL && !empty($customer->contact_number))
+            ->pluck('contact_number')
+            ->all();
 
-        foreach ($customers as $customer) {
-            if ((int)$customer->type === Customer::JURIDICAL) {
-                continue;
-            }
+        $sent = app(SmsService::class)->sendMany($mobiles, $body);
 
-            $mobile = $customer->contact_number;
-
-            if (empty($mobile)) {
-                continue;
-            }
-
-            if ($this->sendSms($mobile, $body)) {
-                $mobilesArray[] = $mobile;
-                $smsTotalCount++;
-            }
-        }
-
-        return [$mobilesArray, $smsTotalCount];
-    }
-
-    private function sendSms(string $mobile, string $body): bool
-    {
-        $urlSMS = "https://RayganSMS.com/SendMessageWithUrl.ashx?"
-            . "Username=" . urlencode(env('TREZ_USERNAME'))
-            . "&Password=" . urlencode(env('TREZ_PASSWORD'))
-            . "&PhoneNumber=" . urlencode(env('TREZ_NUMBER'))
-            . "&MessageBody=" . urlencode($body)
-            . "&RecNumber=" . urlencode($mobile)
-            . "&Smsclass=1";
-
-        return (bool)file_get_contents($urlSMS);
+        return [$sent, count($sent)];
     }
 
 }

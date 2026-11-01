@@ -29,7 +29,7 @@ class AutomatonComment extends Model
 
     public function automation()
     {
-        return $this->hasOne(Automation::class, 'id', 'automation_id');
+        return $this->belongsTo(Automation::class, 'automation_id');
     }
 
     public function user()

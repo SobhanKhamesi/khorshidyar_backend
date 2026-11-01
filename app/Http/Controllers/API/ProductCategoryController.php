@@ -33,7 +33,7 @@ class ProductCategoryController extends Controller
     public function product(Request $request)
     {
         $kalaId = $request->input('id');
-        $comments = Product::where('category_id', $kalaId)->orderBy('created_at', 'DESC')->get();
+        $comments = Product::withStats()->where('category_id', $kalaId)->orderBy('created_at', 'DESC')->get();
         return $this->apiController->respondData($comments);
     }
     public function store(Request $request)

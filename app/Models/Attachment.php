@@ -36,13 +36,13 @@ class Attachment extends Model
 
     public function ticket()
     {
-        return $this->hasOne(Ticket::class, 'id', 'ticket_id');
+        return $this->belongsTo(Ticket::class, 'ticket_id');
     }
 
 
     public function user()
     {
-        return $this->hasOne(User::class, 'id', 'user_id');
+        return $this->belongsTo(User::class, 'user_id');
     }
 
 
