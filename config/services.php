@@ -38,6 +38,8 @@ return [
         'password' => env('TREZ_PASSWORD'),
         'number' => env('TREZ_NUMBER'),
         'timeout' => env('RAYGAN_SMS_TIMEOUT', 10),
+        // شماره‌هایی که اعلان تکمیل فرم اولیه توسط مشتری برایشان پیامک می‌شود (جدا شده با ویرگول)
+        'staff_mobiles' => array_values(array_filter(array_map('trim', explode(',', (string)env('STAFF_NOTIFY_MOBILES', ''))))),
     ],
 
     // آدرس فرانت‌اند (برای لینک‌هایی که در پیامک ارسال می‌شوند)

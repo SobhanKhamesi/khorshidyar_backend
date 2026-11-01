@@ -74,6 +74,8 @@ class MainController extends Controller
             'mozakere_count' => $mozakereCount,
             'after_sale_count' => $after_sale_count,
             'installation_service_count' => $installation_service_count,
+            // فرم‌های اولیه‌ای که مشتری تکمیل کرده و هنوز در کارتابل دیده نشده‌اند
+            'intake_form_count' => IntakeFormController::unseenSubmittedCount(),
         ];
 
         return $this->apiController->respondData($data);

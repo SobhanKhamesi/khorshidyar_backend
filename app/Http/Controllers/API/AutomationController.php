@@ -6,6 +6,7 @@ use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
 use App\Models\Automation;
+use App\Models\AutomationCustomerSurvey;
 use App\Models\AutomationHomeSurvey;
 use App\Models\AutomationIndustrialSurvey;
 use App\Models\AutomatonComment;
@@ -52,12 +53,14 @@ class AutomationController extends Controller
         $this->validate($request, [
             'date' => 'required',
             'customer' => 'required',
+            'expert' => 'required',
             'survey' => 'nullable|string',
             'panel_photo' => 'nullable|image',
             'required_photos.*' => 'nullable|image',
         ], [
             'date.required' => 'تاریخ را وارد نمایید',
             'customer.required' => 'مشتری را انتخاب نمایید',
+            'expert.required' => 'کارشناس فنی را انتخاب نمایید',
         ]);
 
         $customer = Customer::findOrFail($request->input('customer'));
@@ -306,7 +309,7 @@ class AutomationController extends Controller
     public function show(Automation $automation)
     {
         // orders.product از قبل در $with مدل بارگذاری شده است
-        $automation->load(['homeSurvey.gasCoolers', 'industrialSurvey.mainConsumers']);
+        $automation->load(['homeSurvey.gasCoolers', 'industrialSurvey.mainConsumers', 'customerSurvey']);
         return $this->apiController->respondData($automation);
     }
 
@@ -315,10 +318,15 @@ class AutomationController extends Controller
         $this->validate($request, [
             'date' => 'required',
             'customer' => 'required',
-            'surveyType' => 'nullable|in:1,2',
+            'expert' => 'required',
+            'surveyType' => 'nullable|in:1,2,3',
             'survey' => 'nullable|string',
             'panel_photo' => 'nullable|image',
             'required_photos.*' => 'nullable|image',
+        ], [
+            'date.required' => 'تاریخ بازدید را وارد نمایید',
+            'customer.required' => 'مشتری را انتخاب نمایید',
+            'expert.required' => 'کارشناس فنی را انتخاب نمایید',
         ]);
 
         $automation = Automation::findOrFail($request->input('id'));
@@ -572,7 +580,27 @@ class AutomationController extends Controller
                     'type' => $item['type'] ?? null,
                     'starter_type' => $item['starterType'] ?? null,
                 ]);
+
+        } elseif ($surveyType == Automation::CUSTOMER && $survey) {
+
+            // فرم ثبت شده از مشتری؛ همان سوالات فرم اولیه که در سامانه قابل ویرایش است
+            AutomationCustomerSurvey::updateOrCreate(
+                ['automation_id' => $automation->id],
+                $this->mapCustomerSurvey($survey)
+            );
         }
+    }
+
+    private function mapCustomerSurvey(array $s): array
+    {
+        $data = [];
+        foreach (AutomationCustomerSurvey::keys() as $key) {
+            $value = $s[$key] ?? null;
+            $data[$key] = $value === '' ? null : $value;
+        }
+        $data['surface_material'] = array_values((array)($data['surface_material'] ?? []));
+
+        return $data;
     }
 
 

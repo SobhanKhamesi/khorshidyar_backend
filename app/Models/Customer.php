@@ -255,6 +255,7 @@ class Customer extends Model
                 AutomationContractItem::whereIn('automation_id', $automationIds)->delete();
                 AutomationPayment::whereIn('automation_id', $automationIds)->delete();
                 AutomationCheque::whereIn('automation_id', $automationIds)->delete();
+                AutomationCustomerSurvey::whereIn('automation_id', $automationIds)->delete();
 
                 $homeSurveyIds = AutomationHomeSurvey::whereIn('automation_id', $automationIds)->pluck('id');
                 AutomationHomeGasCooler::whereIn('home_survey_id', $homeSurveyIds)->delete();
@@ -274,6 +275,7 @@ class Customer extends Model
                 Ticket::whereIn('id', $ticketIds)->delete();
             }
 
+            CustomerIntakeForm::where('customer_id', $this->id)->delete();
             $this->calls()->delete();
             $this->persons()->delete();
             $this->sms()->delete();

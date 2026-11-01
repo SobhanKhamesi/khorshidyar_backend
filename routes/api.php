@@ -11,6 +11,7 @@ use App\Http\Controllers\API\InstallerAppointmentController;
 use App\Http\Controllers\API\InventoryController;
 use App\Http\Controllers\API\OpportunitiesController;
 use App\Http\Controllers\API\ProductCategoryController;
+use App\Http\Controllers\API\IntakeFormController;
 use App\Http\Controllers\API\RatingController;
 use App\Http\Controllers\API\ReferrerController;
 use App\Http\Controllers\API\RemindersController;
@@ -42,6 +43,10 @@ Route::post('user/login', [UsersController::class, 'login'])->name('login');
 
 Route::get('survey/{token}', [RatingController::class, 'show']);
 Route::post('survey/{token}', [RatingController::class, 'submit']);
+
+// فرم اولیه‌ای که مشتری از طریق لینک پیامک شده تکمیل می‌کند (بدون ورود)
+Route::get('intake/{token}', [IntakeFormController::class, 'show']);
+Route::post('intake/{token}', [IntakeFormController::class, 'submit'])->middleware('throttle:10,1');
 
 Route::middleware('auth:sanctum')->group(callback: function () {
 
@@ -245,6 +250,9 @@ Route::middleware('auth:sanctum')->group(callback: function () {
         Route::post('quick-store', [AutomationController::class, 'quickStore']);
         Route::post('confirm-contract', [AutomationController::class, 'confirmContract']);
         Route::post('referrer-percent', [AutomationController::class, 'referrerPercent']);
+        Route::post('send-intake-form', [IntakeFormController::class, 'send']);
+        Route::get('intake-form/{automation}', [IntakeFormController::class, 'answers']);
+        Route::get('customer-survey/questions', [IntakeFormController::class, 'questions']);
         Route::post('success', [AutomationController::class, 'success']);
         Route::get('cancel/{automation}', [AutomationController::class, 'cancel']);
         Route::post('store', [AutomationController::class, 'store']);

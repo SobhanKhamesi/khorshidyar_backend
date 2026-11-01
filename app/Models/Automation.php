@@ -32,6 +32,7 @@ class Automation extends Model
     // survey_type
     const HOME = 1;  // خانگی
     const INDUSTRIAL = 2;  // صنعتی
+    const CUSTOMER = 3;  // ثبت شده از مشتری (فرم اولیه‌ای که خود مشتری تکمیل کرده)
 
     protected $fillable = [
         'status' ,  // وضعیت
@@ -50,7 +51,7 @@ class Automation extends Model
         'survey_type' ,  // نوع بازدید
         'description' ,
     ];
-    public $with = ['customer', 'orders', 'expert', 'failure', 'comments', 'contractItems', 'payments', 'cheques', 'user'];
+    public $with = ['customer', 'orders', 'expert', 'failure', 'comments', 'contractItems', 'payments', 'cheques', 'user', 'intakeForm'];
     public $appends = ['jalali_date', 'jalali_visit_date', 'sabtKonande', 'referrer_income'];
 
     protected $casts = [
@@ -70,6 +71,18 @@ class Automation extends Model
     public function homeSurvey()  // فرم بازدید خانگی
     {
         return $this->hasOne(AutomationHomeSurvey::class, 'automation_id');
+    }
+
+    public function customerSurvey() // فرم بازدید ثبت شده از مشتری
+    {
+        return $this->hasOne(AutomationCustomerSurvey::class, 'automation_id');
+    }
+
+    // آخرین لینک فرم اولیه‌ای که برای مشتری ارسال شده (وضعیت تکمیل و مشاهده)
+    public function intakeForm()
+    {
+        // شناسه‌ها uuid تصادفی هستند؛ «آخرین» بر اساس زمان ایجاد تعیین می‌شود نه بزرگ‌ترین id
+        return $this->hasOne(CustomerIntakeForm::class, 'automation_id')->latestOfMany('created_at');
     }
 
     public function industrialSurvey() // فرم بازدید صنعتی
