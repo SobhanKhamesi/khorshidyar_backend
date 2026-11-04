@@ -108,7 +108,7 @@
         <div class="row" style="align-items: center;">
             <div class="col-auto">
                 برگه نصب
-                ({{ $installationService->status == InstallationService::FINAL ? 'نهایی' : 'موقت' }})
+                ({{ $installationService->stage_label }})
             </div>
             <div class="col text-center">
             </div>
@@ -150,42 +150,42 @@
         $roleLabels = InstallationService::ROLE_LABELS;
         $roleMap = InstallationService::ROLE_MAP;
 
+        $isSingleInstaller = $installationService->installer_mode == InstallationService::MODE_SINGLE;
+        $activeAppointments = $installationService->activeAppointments()->with('installer')->get();
+
         $installerRows = collect($roleMap)
             ->except('after_sale')
-            ->map(function ($typeValue, $roleKey) use ($installationService, $roleLabels) {
+            ->map(function ($typeValue, $roleKey) use ($activeAppointments, $roleLabels, $isSingleInstaller) {
                 return [
-                    'label' => $roleLabels[$roleKey] ?? $roleKey,
+                    'label' => $isSingleInstaller ? 'نصاب کل پروژه' : ($roleLabels[$roleKey] ?? $roleKey),
+                    'appointment' => $activeAppointments->firstWhere('type', $typeValue),
                 ];
             });
     @endphp
 
-    @if(count($installationService->installationServiceItems) > 0)
-        <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
-            <div class="mb-2" style="font-weight: bold">اقلام مصرفی</div>
-            <table class="table table-bordered">
-                <tr>
-                    <th class="text-center">#</th>
-                    <th class="text-center">شرح</th>
-                    <th class="text-center">مقدار</th>
-                </tr>
-                <tbody>
-                @php $i = 1; @endphp
-                @forelse($installationService->installationServiceItems as $item)
+    @foreach(['اقلام پیش‌نیاز' => $installationService->requiredItems, 'اقلام مصرف شده (ثبت شده توسط نصاب)' => $installationService->usedItems] as $itemsTitle => $items)
+        @if(count($items) > 0)
+            <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+                <div class="mb-2" style="font-weight: bold">{{ $itemsTitle }}</div>
+                <table class="table table-bordered">
                     <tr>
-                        <td>{{ $i }}</td>
-                        <td style="font-weight: bold">{{ $item->product->name }}</td>
-                        <td style="font-weight: bold">{{ $item->quantity }}</td>
+                        <th class="text-center">#</th>
+                        <th class="text-center">شرح</th>
+                        <th class="text-center">مقدار</th>
                     </tr>
-                    @php $i++; @endphp
-                @empty
-                    <tr>
-                        <td colspan="3" class="text-center">قلم مصرفی ثبت نشده است</td>
-                    </tr>
-                @endforelse
-                </tbody>
-            </table>
-        </div>
-    @endif
+                    <tbody>
+                    @foreach($items as $i => $item)
+                        <tr>
+                            <td>{{ $i + 1 }}</td>
+                            <td style="font-weight: bold">{{ $item->product->name }}</td>
+                            <td style="font-weight: bold">{{ $item->quantity }} {{ $item->product->unit?->title }}</td>
+                        </tr>
+                    @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
+    @endforeach
     @if($installationService->automation)
         <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
             <div class="mb-2" style="font-weight: bold">اطلاعات فاکتور فروش {{ $installationService->automation->invoice_number ?? " : " .$installationService->automation->invoice_number }}</div>

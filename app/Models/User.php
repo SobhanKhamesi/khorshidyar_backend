@@ -30,7 +30,7 @@ class User extends Authenticatable
     const INACTIVE = 1;
 
     protected $fillable = [
-        'name', 'username', 'password', 'status', 'role', 'profile', 'emza'
+        'name', 'username', 'mobile', 'password', 'status', 'role', 'profile', 'emza'
     ];
 
     protected $hidden = [

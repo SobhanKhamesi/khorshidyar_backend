@@ -65,8 +65,10 @@ class MainController extends Controller
             ->whereIn("follow_up_date", [Carbon::today(), Carbon::tomorrow()])
             ->whereIn("status", [AfterSalesService::STATUS_PENDING, AfterSalesService::STATUS_IN_PROGRESS])->count();
 
+        // فقط سرویس‌هایی که منتظر اقدام کاربر جاری هستند (تکمیل نهایی شده‌ها شمرده نمی‌شوند)
         $installation_service_count = InstallationService::query()
-            ->count(); // todo
+            ->awaitingActionBy(auth()->user())
+            ->count();
 
         $data = [
             'darkhast_count' => $darkhastCount,

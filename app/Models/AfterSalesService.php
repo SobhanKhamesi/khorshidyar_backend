@@ -58,7 +58,7 @@ class AfterSalesService extends Model
 
     protected $with = ["ratings" , "serviceType"];
 
-    public $appends = ['jalali_date', 'jalali_request_date', 'jalali_follow_up_date', 'status_label', 'source_label'];
+    public $appends = ['jalali_date', 'jalali_request_date', 'jalali_follow_up_date', 'status_label', 'source_label', 'installation_service_title'];
 
     protected $casts = [
         'request_date' => 'date',
@@ -134,5 +134,14 @@ class AfterSalesService extends Model
     public function getSourceLabelAttribute()
     {
         return self::SOURCE_LABELS[$this->source] ?? null;
+    }
+
+    // عنوان سرویس نصب مرتبط به جای شناسه؛ فقط وقتی رابطه از قبل لود شده (بدون کوئری اضافه)
+    public function getInstallationServiceTitleAttribute()
+    {
+        if (!$this->installation_service_id || !$this->relationLoaded('installationService'))
+            return null;
+
+        return $this->installationService?->title;
     }
 }

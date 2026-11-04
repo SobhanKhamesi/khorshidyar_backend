@@ -90,6 +90,12 @@ class Automation extends Model
         return $this->hasOne(CustomerIntakeForm::class, 'automation_id')->latestOfMany('created_at');
     }
 
+    // سرویس نصبی که پس از فروش موفق برای این پروژه ارجاع شده (هر فروش موفق یک سرویس نصب دارد)
+    public function installationService()
+    {
+        return $this->hasOne(InstallationService::class, 'automation_id')->latestOfMany('created_at');
+    }
+
     public function industrialSurvey() // فرم بازدید صنعتی
     {
         return $this->hasOne(AutomationIndustrialSurvey::class, 'automation_id');

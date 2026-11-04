@@ -93,6 +93,7 @@ class UsersController extends Controller
         $user = User::create([
             'name' => $request->input('name'),
             'username' => $request->input('username'),
+            'mobile' => $request->input('mobile'),
             'password' => $request->input('password'),
             'status' => User::ACTIVE,
             'role' => $request->input('role'),
@@ -139,6 +140,7 @@ class UsersController extends Controller
         $create = $user->update([
             'name' => $request->input('name'),
             'username' => $request->input('username'),
+            'mobile' => $request->input('mobile'),
             'role' => $request->input('role'),
         ]);
         if ($request->input('password') !== null && strlen($request->input('password')) > 0)
@@ -262,13 +264,14 @@ class UsersController extends Controller
         $user = User::create([
             'name' => $request->input('name'),
             'username' => $request->input('username'),
+            'mobile' => $request->input('mobile'),
             'password' => "123456",
             'status' => User::ACTIVE,
             'role' => User::NASSAB,
         ]);
 
         if ($user) {
-            return $this->apiController->respondCreated();
+            return $this->apiController->respondCreated('نصاب با موفقیت ثبت شد', $user);
         } else {
             return response()->json(null, 500);
         }

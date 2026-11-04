@@ -16,14 +16,21 @@ class InstallationServiceItem extends Model
 
     protected $keyType = 'string';
 
+    // ---- type ----
+    const TYPE_REQUIRED = 1; // اقلام پیش‌نیاز (تعیین شده توسط مدیر هنگام ارجاع به نصاب)
+    const TYPE_USED = 2;     // اقلام مصرف شده (ثبت شده توسط نصاب در پایان نصب)
+
     protected $fillable = [
         'installation_service_id',
         'product_id',
+        'type',
         'quantity',
     ];
 
+    // مقدار می‌تواند اعشاری باشد (مثلاً متر کابل)؛ واحد از محصول خوانده می‌شود
     protected $casts = [
-        'quantity' => 'integer',
+        'quantity' => 'float',
+        'type' => 'integer',
     ];
 
     public function installationService(): BelongsTo

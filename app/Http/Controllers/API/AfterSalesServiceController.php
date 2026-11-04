@@ -6,12 +6,14 @@ use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\Controller;
 use App\Models\AfterSalesService;
 use App\Models\Customer;
+use App\Models\InstallationService;
 use App\Models\Rating;
-use App\Models\Sms;
 use App\Models\SourceSms;
+use App\Services\AfterSalesSmsNotifier;
 use Hekmatinasser\Verta\Verta;
 use App\Services\SmsService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
 
 
@@ -61,6 +63,7 @@ class AfterSalesServiceController extends Controller
                 'jalali_follow_up_date' => $service->jalali_follow_up_date,
                 'jalali_date' => $service->jalali_date,
                 'installation_service_id' => $service->installation_service_id,
+                'installation_service_title' => $service->installation_service_title,
                 'resolution_description' => $service->resolution_description,
             ];
         });
@@ -68,9 +71,32 @@ class AfterSalesServiceController extends Controller
         return $this->apiController->respondData($data->values());
     }
 
-    public function store(Request $request)
+    /**
+     * سرویس‌های نصب تکمیل شده‌ی مشتری برای انتخاب در فرم خدمات پس از فروش، همراه با نصاب پروژه
+     */
+    public function customerInstallations($customerId)
     {
-        $this->validatePayload($request);
+        Customer::findOrFail($customerId);
+
+        $services = InstallationService::query()
+            ->withoutEagerLoads()
+            ->where('customer_id', $customerId)
+            ->where('stage', InstallationService::STAGE_COMPLETED)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn(InstallationService $service) => [
+                'id' => $service->id,
+                'title' => $service->title,
+                'project_installer' => $service->projectInstaller()?->only(['id', 'name', 'mobile']),
+            ]);
+
+        return $this->apiController->respondData($services->values());
+    }
+
+    public function store(Request $request, AfterSalesSmsNotifier $notifier)
+    {
+        $this->applyProjectInstaller($request);
+        $this->validatePayload($request, true);
 
         try {
             $service = DB::transaction(function () use ($request) {
@@ -78,29 +104,32 @@ class AfterSalesServiceController extends Controller
                 $attributes['status'] = AfterSalesService::STATUS_PENDING;
                 $attributes['source'] = AfterSalesService::SOURCE_MANUAL;
 
-                $service = AfterSalesService::create($attributes);
-                $this->syncInstaller($service, $request);
-                return $service;
+                return AfterSalesService::create($attributes);
             });
         } catch (\Exception $e) {
             return $this->apiController->respondError($e->getMessage());
         }
 
+        $warnings = $notifier->notifyRegistered($service);
+        $message = 'با موفقیت ثبت شد و پیامک برای مشتری و نصاب ارسال شد';
+        if ($warnings)
+            $message = 'با موفقیت ثبت شد. ' . implode(' - ', $warnings);
+
         return $this->apiController->respondCreated(
-            'با موفقیت ثبت شد',
-            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser', 'installerAppointments.installer'])
+            $message,
+            $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser'])
         );
     }
 
     public function update(Request $request, $id)
     {
         $service = AfterSalesService::findOrFail($id);
+        $this->applyProjectInstaller($request);
         $this->validatePayload($request);
 
         try {
             DB::transaction(function () use ($request, $service) {
                 $service->update($this->extractServiceAttributes($request));
-                $this->syncInstaller($service, $request);
             });
         } catch (\Exception $e) {
             return $this->apiController->respondError($e->getMessage());
@@ -161,22 +190,40 @@ class AfterSalesServiceController extends Controller
         return $this->apiController->respondDeleted();
     }
 
-    private function validatePayload(Request $request): void
+    /**
+     * مسئول خدمتِ مرتبط با یک سرویس نصب، نصاب خود همان پروژه است (اگر مسئول دیگری انتخاب نشده باشد)
+     */
+    private function applyProjectInstaller(Request $request): void
+    {
+        if ($request->filled('responsible_user_id') || !$request->filled('installation_service_id'))
+            return;
+
+        $installer = InstallationService::find($request->input('installation_service_id'))?->projectInstaller();
+        if ($installer)
+            $request->merge(['responsible_user_id' => $installer->id]);
+    }
+
+    private function validatePayload(Request $request, bool $creating = false): void
     {
         $this->validate($request, [
             'customer_id' => 'required|exists:customers,id',
-            'installation_service_id' => 'nullable|exists:installation_services,id',
+            'installation_service_id' => [
+                'nullable',
+                Rule::exists('installation_services', 'id')->where('customer_id', $request->input('customer_id')),
+            ],
             'problem' => 'required|string',
             'service_type_id' => 'required|exists:service_types,id',
             'responsible_user_id' => 'required|exists:users,id',
             'request_date' => 'nullable',
-            'follow_up_date' => 'nullable',
-            'installer_id' => 'nullable|exists:users,id',
+            // تاریخ مراجعه در پیامک مشتری ارسال می‌شود
+            'follow_up_date' => $creating ? 'required' : 'nullable',
         ], [
             'customer_id.required' => 'مشتری را انتخاب کنید',
+            'installation_service_id.exists' => 'سرویس نصب انتخاب شده متعلق به این مشتری نیست',
             'problem.required' => 'مشکل را وارد کنید',
             'service_type_id.required' => 'نوع خدمت را انتخاب کنید',
             'responsible_user_id.required' => 'مسئول این خدمت را انتخاب کنید',
+            'follow_up_date.required' => 'تاریخ مراجعه را وارد کنید',
         ]);
     }
 

@@ -293,8 +293,13 @@ Route::middleware('auth:sanctum')->group(callback: function () {
 
     Route::prefix('installation-service')->group(function () {
         Route::get('list', [InstallationServiceController::class, 'list']);
+        Route::get('my-cartable', [InstallationServiceController::class, 'myCartable']);
         Route::get('customer/{customerId}/automations', [InstallationServiceController::class, 'customerAutomations']);
         Route::post('store', [InstallationServiceController::class, 'store']);
+        Route::post('{id}/installer-submit', [InstallationServiceController::class, 'installerSubmit']);
+        Route::post('{id}/send-to-review', [InstallationServiceController::class, 'sendToReview']);
+        Route::post('{id}/review', [InstallationServiceController::class, 'review']);
+        Route::post('{id}/complete', [InstallationServiceController::class, 'complete']);
         Route::put('{id}', [InstallationServiceController::class, 'update']);
         Route::get('{id}', [InstallationServiceController::class, 'show']);
         Route::delete('destroy/{id}', [InstallationServiceController::class, 'destroy']);
@@ -305,8 +310,10 @@ Route::middleware('auth:sanctum')->group(callback: function () {
         Route::get('{id}', [AfterSalesServiceController::class, 'show']);
         Route::put('{id}', [AfterSalesServiceController::class, 'update']);
         Route::get('customer-history/{customerId}', [AfterSalesServiceController::class, 'customerHistory']);
+        Route::get('customer-installations/{customerId}', [AfterSalesServiceController::class, 'customerInstallations']);
         Route::post('store', [AfterSalesServiceController::class, 'store']);
         Route::put('complete/{id}', [AfterSalesServiceController::class, 'complete']);
+        Route::delete('destroy/{id}', [AfterSalesServiceController::class, 'destroy']);
     });
 
     Route::group(['prefix' => 'charts'], function () {

@@ -44,6 +44,10 @@ class AutomationController extends Controller
         if (auth()->user()->role == User::KARSHENAS_FANI && $status !== Automation::SUCCESS && $status !== Automation::FAILURE)
             $query->where('user_id', auth()->id());
 
+        // در لیست فروش‌های موفق، وضعیت ارجاع به سرویس نصب هم نمایش داده می‌شود
+        if ($status === Automation::SUCCESS)
+            $query->with(['installationService' => fn($q) => $q->withoutEagerLoads()]);
+
         return $this->apiController->respondData($query->get());
     }
 

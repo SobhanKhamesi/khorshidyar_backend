@@ -22,9 +22,33 @@ class InstallationService extends Model
     const INTERNAL = 1;
     const EXTERNAL = 2;
 
+    // ---- installer_mode ----
+    const MODE_SINGLE = 1;   // کل پروژه نصب به یک نصاب ارجاع می‌شود (در نوبت نقش panel ذخیره می‌شود)
+    const MODE_SEPARATE = 2; // نصاب پنل، سیم کشی و راه اندازی جداگانه انتخاب می‌شوند
+
     // ---- status ----
+    // فقط وقتی سرویس به مرحله‌ی «تکمیل نهایی» برسد FINAL می‌شود؛ مرحله‌ی دقیق در ستون stage است
     const TEMPORARY = 1; // موقت
     const FINAL = 2;  // نهایی
+
+    // ---- stage (گردش کار سرویس نصب) ----
+    const STAGE_DRAFT = 0;               // پیش‌نویس (هنوز به نصاب ارجاع نشده)
+    const STAGE_ASSIGNED = 1;            // ارجاع شده به نصاب - در حال نصب
+    const STAGE_INSTALLER_SUBMITTED = 2; // نصاب اقلام مصرفی را ثبت و به مدیر ارجاع داده
+    const STAGE_UNDER_REVIEW = 3;        // ارسال شده برای بررسی کارشناس فنی
+    const STAGE_NEEDS_FIX = 4;           // برگشت به نصاب برای رفع عیوب
+    const STAGE_APPROVED = 5;            // تایید شده توسط کارشناس فنی
+    const STAGE_COMPLETED = 6;           // تکمیل نهایی
+
+    const STAGE_LABELS = [
+        self::STAGE_DRAFT => 'پیش‌نویس',
+        self::STAGE_ASSIGNED => 'ارجاع به نصاب - در حال نصب',
+        self::STAGE_INSTALLER_SUBMITTED => 'تکمیل توسط نصاب - در انتظار ارجاع به کارشناس',
+        self::STAGE_UNDER_REVIEW => 'در حال بررسی کارشناس فنی',
+        self::STAGE_NEEDS_FIX => 'برگشت به نصاب برای رفع عیوب',
+        self::STAGE_APPROVED => 'تایید کارشناس - آماده تکمیل نهایی',
+        self::STAGE_COMPLETED => 'تکمیل نهایی',
+    ];
 
     // ---- نقش نصاب‌ها (باید با ستون type در installer_appointments هم‌خوان باشد) ----
     const ROLE_PANEL = 1;
@@ -58,20 +82,26 @@ class InstallationService extends Model
     protected $fillable = [
         'customer_id',
         'purchase_source',
+        'installer_mode',
         'automation_id',
         'address',
         'contact_number',
         'description',
         'survey_date',
-        'technical_expert_id',
+        'technical_expert_id', // کارشناس فنی بررسی کننده‌ی پروژه پس از تکمیل نصاب
         'status',
+        'stage',
+        'completed_at',
     ];
 
     protected $with = ['technicalExpert'];
-    public $appends = ['jalali_date', 'jalali_survey_date'];
+    public $appends = ['jalali_date', 'jalali_survey_date', 'stage_label'];
 
     protected $casts = [
         'survey_date' => 'date',
+        'completed_at' => 'datetime',
+        'stage' => 'integer',
+        'installer_mode' => 'integer',
     ];
 
     public function customer(): BelongsTo
@@ -97,6 +127,86 @@ class InstallationService extends Model
     public function installationServiceItems(): HasMany
     {
         return $this->hasMany(InstallationServiceItem::class);
+    }
+
+    public function requiredItems(): HasMany // اقلام پیش‌نیاز
+    {
+        return $this->hasMany(InstallationServiceItem::class)->where('type', InstallationServiceItem::TYPE_REQUIRED);
+    }
+
+    public function usedItems(): HasMany // اقلام مصرف شده توسط نصاب
+    {
+        return $this->hasMany(InstallationServiceItem::class)->where('type', InstallationServiceItem::TYPE_USED);
+    }
+
+    public function histories(): HasMany
+    {
+        return $this->hasMany(InstallationServiceHistory::class)->orderBy('created_at');
+    }
+
+    public function activeAppointments(): HasMany
+    {
+        return $this->hasMany(InstallerAppointment::class)->where('status', '!=', InstallerAppointment::CANCELED);
+    }
+
+    public function getStageLabelAttribute()
+    {
+        return self::STAGE_LABELS[$this->stage] ?? null;
+    }
+
+    public function isAssignedTo($userId): bool
+    {
+        return $this->activeAppointments()->where('user_id', $userId)->exists();
+    }
+
+    /**
+     * نصاب خود پروژه: نصاب کل پروژه (حالت یک نصاب) یا نصاب پنل؛ در غیر این صورت اولین نصاب فعال
+     */
+    public function projectInstaller(): ?User
+    {
+        $appointments = $this->activeAppointments()->with('installer')->orderBy('type')->get();
+
+        return ($appointments->firstWhere('type', self::ROLE_PANEL) ?? $appointments->first())?->installer;
+    }
+
+    // عنوان خوانا برای نمایش به جای شناسه
+    public function getTitleAttribute(): string
+    {
+        return 'سرویس نصب ثبت شده در ' . (new Verta($this->created_at))->format('Y/m/d')
+            . ($this->stage_label ? ' (' . $this->stage_label . ')' : '');
+    }
+
+    /**
+     * سرویس‌هایی که منتظر اقدام کاربر هستند (تکمیل نهایی شده‌ها هیچ‌وقت شمرده نمی‌شوند)
+     *  - نصاب: ارجاع شده یا برگشت خورده‌ی خودش
+     *  - کارشناس فنی: سرویس‌های در حال بررسی که به او سپرده شده
+     *  - مدیر: پیش‌نویس، تکمیل شده توسط نصاب، تایید شده (منتظر تکمیل نهایی) و هر سرویس در حال بررسی
+     */
+    public function scopeAwaitingActionBy($query, User $user)
+    {
+        if ($user->role == User::NASSAB) {
+            return $query->whereIn('stage', [self::STAGE_ASSIGNED, self::STAGE_NEEDS_FIX])
+                ->whereHas('activeAppointments', fn($q) => $q->where('user_id', $user->id));
+        }
+
+        return $query->where(function ($q) use ($user) {
+            $q->where(fn($q) => $q->where('stage', self::STAGE_UNDER_REVIEW)->where('technical_expert_id', $user->id));
+
+            if ($user->role == User::ADMIN) {
+                $q->orWhereIn('stage', [
+                    self::STAGE_DRAFT, self::STAGE_INSTALLER_SUBMITTED, self::STAGE_UNDER_REVIEW, self::STAGE_APPROVED,
+                ]);
+            }
+        });
+    }
+
+    public function logStage(int $stage, ?string $description = null): void
+    {
+        $this->histories()->create([
+            'user_id' => auth()->id(),
+            'stage' => $stage,
+            'description' => $description,
+        ]);
     }
 
     public function afterSalesServices(): HasMany
