@@ -117,10 +117,6 @@
                     <span>تاریخ ثبت : </span>
                     <span>{{ $installationService->jalali_date }}</span>
                 </div>
-                <div>
-                    <span>تاریخ بازدید : </span>
-                    <span>{{ $installationService->jalali_survey_date }}</span>
-                </div>
             </div>
         </div>
     </div>
@@ -131,14 +127,6 @@
                 <span>منبع خرید : </span>
                 <span>{{ $installationService->purchase_source == InstallationService::INTERNAL ? 'خرید شده از ما' : 'خریداری شده از جای دیگر' }}</span>
             </div>
-            <div class="col text-center">
-            </div>
-            @if($installationService->technicalExpert)
-                <div class="col-auto">
-                    <span>کارشناس فنی : </span>
-                    <span>{{ $installationService->technicalExpert->name }}</span>
-                </div>
-            @endif
         </div>
         @if($installationService->automation && $installationService->automation->invoice_number)
             <div class="row mt-1">

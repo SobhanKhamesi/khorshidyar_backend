@@ -158,6 +158,8 @@ class AutomationController extends Controller
     /**
      * اصلاحیه فاکتور و روش پرداخت؛ در هر مرحله‌ای از اتوماسیون (حتی فروش موفق یا ناموفق) قابل انجام است.
      * وضعیت اتوماسیون تغییر نمی‌کند و یک کامنت خودکار برای سابقه ثبت می‌شود.
+     * فقط بخش‌های ارسال شده تغییر می‌کنند: اقلام (orders)، مبلغ نهایی (final_price) و پرداختی‌ها/چک‌ها (payments/cheques)؛
+     * تا دیالوگ نمایش پیش فاکتور و دیالوگ پرداختی‌ها بتوانند هر کدام فقط بخش خود را ویرایش کنند.
      */
     public function amend(Request $request)
     {
@@ -167,27 +169,43 @@ class AutomationController extends Controller
             'orders.*.orderProductId' => 'required|exists:products,id',
             'orders.*.orderCount' => 'required|numeric|min:1',
             'orders.*.orderPrice' => 'required|numeric|min:0',
-        ], self::FINAL_PRICE_RULE, self::PAYMENT_RULES), self::FINAL_PRICE_MESSAGES);
+            'final_price' => 'required_with:orders|nullable|numeric|min:0',
+        ], self::PAYMENT_RULES), self::FINAL_PRICE_MESSAGES + [
+            'final_price.required_with' => 'مبلغ نهایی را وارد نمایید',
+        ]);
 
         $automation = Automation::findOrFail($request->input('id'));
         $oldPrice = $automation->final_price;
+        $invoiceChanged = $request->has('orders') || $request->filled('final_price');
+        $paymentsChanged = $request->has('payments') || $request->has('cheques');
 
-        DB::transaction(function () use ($request, $automation, $oldPrice) {
+        if (!$invoiceChanged && !$paymentsChanged)
+            return $this->apiController->respondError('تغییری برای ثبت ارسال نشده است');
+
+        DB::transaction(function () use ($request, $automation, $oldPrice, $invoiceChanged, $paymentsChanged) {
             if ($request->has('orders'))
                 $this->addOrder($request->input('orders') ?? [], $automation);
 
-            $this->savePaymentsAndCheques($automation, $request->input('payments', []), $request->input('cheques', []));
+            if ($paymentsChanged)
+                $this->savePaymentsAndCheques($automation, $request->input('payments', []), $request->input('cheques', []));
 
-            $automation->update(['final_price' => $request->input('final_price')]);
+            if ($request->filled('final_price'))
+                $automation->update(['final_price' => $request->input('final_price')]);
 
             // قرارداد تایید شده‌ای که هنوز امضا نشده، با تغییر فاکتور نیاز به بازبینی و تایید مجدد دارد
             $automation->contract?->invalidateApproval();
 
+            $parts = [];
+            if ($invoiceChanged)
+                $parts[] = 'مبلغ نهایی: ' . number_format((float)$oldPrice) . ' ← '
+                    . number_format((float)$automation->final_price) . ' تومان';
+            if ($paymentsChanged)
+                $parts[] = 'پرداختی‌ها و چک‌ها ویرایش شد';
+
             AutomatonComment::create([
                 'automation_id' => $automation->id,
                 'user_id' => auth()->id(),
-                'content' => 'اصلاحیه فاکتور / روش پرداخت ثبت شد. مبلغ نهایی: '
-                    . number_format((float)$oldPrice) . ' ← ' . number_format((float)$request->input('final_price')) . ' تومان'
+                'content' => 'اصلاحیه فاکتور / روش پرداخت ثبت شد. ' . implode(' - ', $parts)
                     . ($request->filled('reason') ? "\nعلت: " . $request->input('reason') : ''),
             ]);
         });
@@ -367,15 +385,37 @@ class AutomationController extends Controller
 
     public function destroy(Request $request)
     {
-        $failure = null;
-        if ($request->input('failure') !== null)
-            $failure = FailureCategory::findOrFail($request->input('failure'))->id;
+        $failure = $request->input('failure') !== null
+            ? FailureCategory::findOrFail($request->input('failure'))
+            : null;
 
         $data = Automation::findorFail($request->input('id'));
-        $data->update([
-            'status' => Automation::FAILURE,
-            'failure_id' => $failure,
-        ]);
+        $wasSuccess = (int)$data->status === Automation::SUCCESS;
+
+        DB::transaction(function () use ($request, $data, $failure, $wasSuccess) {
+            $data->update([
+                'status' => Automation::FAILURE,
+                'failure_id' => $failure?->id,
+            ]);
+
+            if (!$wasSuccess)
+                return;
+
+            // تبدیل فروش موفق به ناموفق: اگر مشتری فروش موفق دیگری ندارد، از «مشتری» به «فرصت» برمی‌گردد
+            $customer = $data->customer;
+            if ($customer && (int)$customer->status === Customer::CUSTOMER
+                && !$customer->automations()->where('status', Automation::SUCCESS)->exists())
+                $customer->update(['status' => Customer::OPPORTUNITY]);
+
+            AutomatonComment::create([
+                'automation_id' => $data->id,
+                'user_id' => auth()->id(),
+                'content' => 'فروش موفق به ناموفق تبدیل شد.'
+                    . ($failure ? "\nدلیل شکست: " . $failure->title : '')
+                    . ($request->filled('reason') ? "\nتوضیحات: " . $request->input('reason') : ''),
+            ]);
+        });
+
         return $this->apiController->respondDeleted('با موفقیت حذف شد', $data);
     }
 

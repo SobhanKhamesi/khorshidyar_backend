@@ -26,7 +26,7 @@ class InstallationServiceController extends Controller
     public function list()
     {
         $list = InstallationService::query()
-            ->with(['customer', 'automation', 'technicalExpert', 'installerAppointments', 'installationServiceItems.product'])
+            ->with(['customer', 'automation', 'installerAppointments', 'installationServiceItems.product'])
             ->orderbyDesc('created_at')->get();
 
         return $this->apiController->respondData($list);
@@ -93,7 +93,7 @@ class InstallationServiceController extends Controller
 
     public function show($id)
     {
-        $service = InstallationService::with(['customer', 'automation', 'technicalExpert', 'installerAppointments', 'installationServiceItems.product'])
+        $service = InstallationService::with(['customer', 'automation', 'installerAppointments', 'installationServiceItems.product'])
             ->findOrFail($id);
 
         return $this->apiController->respondData($service);
@@ -117,9 +117,6 @@ class InstallationServiceController extends Controller
             'address' => 'nullable|string',
             'contact_number' => 'nullable|string',
             'description' => 'nullable|string',
-            'survey_date' => $isFinal ? 'required' : 'nullable',
-            'technical_expert' => $isFinal ? 'required' : 'nullable',
-            'technical_expert.id' => $isFinal ? 'required|exists:users,id' : 'nullable|exists:users,id',
             'status' => ['required', Rule::in([InstallationService::TEMPORARY, InstallationService::FINAL])],
             'installers' => 'required|array',
 
@@ -144,8 +141,6 @@ class InstallationServiceController extends Controller
         }
 
         $this->validate($request, $rules, [
-            'survey_date.required' => 'تاریخ بازدید را وارد کنید',
-            'technical_expert.required' => 'کارشناس فنی را انتخاب کنید',
             'items.*.product_id.required_with' => 'محصول ردیف اقلام مصرفی را انتخاب کنید',
             'items.*.quantity.required_with' => 'تعداد ردیف اقلام مصرفی را وارد کنید',
         ]);
@@ -179,10 +174,7 @@ class InstallationServiceController extends Controller
             'address' => $request->input('address'),
             'contact_number' => $request->input('contact_number'),
             'description' => $request->input('description'),
-            'survey_date' => $request->filled('survey_date')
-                ? Verta::parse($request->input('survey_date'))->datetime()->format('Y-m-d')
-                : null,
-            'technical_expert_id' => $request->input('technical_expert.id'),
+            // تاریخ بازدید و کارشناس فنی از سرویس نصب حذف شده‌اند؛ ستون‌ها برای داده‌های قدیمی دست نمی‌خورند
             'status' => $request->input('status'),
         ];
     }
