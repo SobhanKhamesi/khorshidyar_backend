@@ -37,7 +37,6 @@ class Customer extends Model
     protected $casts = [
         'status' => 'integer',
         'type' => 'integer',
-        'type_call' => 'integer',
         'lead_status' => 'integer',
     ];
 

@@ -15,7 +15,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // جدول personal_access_tokens در migrations خود پروژه با کلید uuid ساخته می‌شود
+        Sanctum::ignoreMigrations();
     }
 
     /**
