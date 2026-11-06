@@ -89,6 +89,10 @@ Route::middleware('auth:sanctum')->group(callback: function () {
     Route::post('user/update-info', [UsersController::class, 'changeInfo']);
     Route::post('users/quick-add', [UsersController::class, 'quickAdd']);
 
+    // دستمزد پیش‌فرض نصاب‌ها و کارشناسان فنی (تنظیمات)
+    Route::get('wage-settings', [UsersController::class, 'wageSettings']);
+    Route::post('wage-settings', [UsersController::class, 'saveWageSettings']);
+
     // پروفایل کاربر ({user} = شناسه کاربر یا me)
     Route::prefix('profile')->group(function () {
         Route::put('earnings/{id}', [ProfileController::class, 'updateEarning']);
@@ -312,6 +316,12 @@ Route::middleware('auth:sanctum')->group(callback: function () {
         Route::post('{id}/send-to-review', [InstallationServiceController::class, 'sendToReview']);
         Route::post('{id}/review', [InstallationServiceController::class, 'review']);
         Route::post('{id}/complete', [InstallationServiceController::class, 'complete']);
+        // سود و زیان پروژه
+        Route::get('{id}/finance', [InstallationServiceController::class, 'finance']);
+        Route::post('{id}/finance-items', [InstallationServiceController::class, 'storeFinanceItem']);
+        Route::put('{id}/finance-items/{itemId}', [InstallationServiceController::class, 'updateFinanceItem']);
+        Route::delete('{id}/finance-items/{itemId}', [InstallationServiceController::class, 'destroyFinanceItem']);
+        Route::put('{id}/item-prices', [InstallationServiceController::class, 'updateItemPrices']);
         Route::put('{id}', [InstallationServiceController::class, 'update']);
         Route::get('{id}', [InstallationServiceController::class, 'show']);
         Route::delete('destroy/{id}', [InstallationServiceController::class, 'destroy']);

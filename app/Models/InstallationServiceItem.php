@@ -25,13 +25,20 @@ class InstallationServiceItem extends Model
         'product_id',
         'type',
         'quantity',
+        'unit_purchase_price', // قیمت خرید واحد در این پروژه (از فاکتور فروش یا قیمت محصول، قابل ویرایش توسط مدیر)
     ];
 
     // مقدار می‌تواند اعشاری باشد (مثلاً متر کابل)؛ واحد از محصول خوانده می‌شود
     protected $casts = [
         'quantity' => 'float',
         'type' => 'integer',
+        'unit_purchase_price' => 'integer',
     ];
+
+    public function getTotalCostAttribute(): int
+    {
+        return (int)round($this->quantity * (int)$this->unit_purchase_price);
+    }
 
     public function installationService(): BelongsTo
     {

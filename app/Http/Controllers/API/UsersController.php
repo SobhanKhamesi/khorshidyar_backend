@@ -6,6 +6,7 @@ use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\UserProjectEarning;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -345,5 +346,59 @@ class UsersController extends Controller
         return $this->apiController->respondMessage('خروج با موفقیت انجام شد');
     }
 
+    /**
+     * دستمزد پیش‌فرض نصاب‌ها و کارشناسان فنی به تفکیک نوع کار؛ هنگام ارجاع پروژه به‌طور خودکار
+     * به‌عنوان دریافتی فرد از آن پروژه ثبت می‌شود (و در پروفایل او نمایش داده می‌شود).
+     */
+    public function wageSettings()
+    {
+        if (auth()->user()->role !== User::ADMIN)
+            return $this->apiController->respondForbidden();
 
+        $users = User::whereIn('role', [User::NASSAB, User::KARSHENAS_FANI])
+            ->where('status', User::ACTIVE)
+            ->orderBy('role')->orderBy('name')
+            ->get(['id', 'name', 'role', 'default_wages'])
+            ->map(fn(User $user) => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'role' => $user->role,
+                'role_label' => $user->role_label,
+                'default_wages' => (object)($user->default_wages ?? []),
+            ]);
+
+        return $this->apiController->respondData([
+            'works' => UserProjectEarning::WORK_LABELS,
+            'users' => $users,
+        ]);
+    }
+
+    public function saveWageSettings(Request $request)
+    {
+        if (auth()->user()->role !== User::ADMIN)
+            return $this->apiController->respondForbidden();
+
+        $this->validate($request, [
+            'users' => 'required|array',
+            'users.*.id' => 'required|exists:users,id',
+            'users.*.default_wages' => 'nullable|array',
+            'users.*.default_wages.*' => 'nullable|integer|min:0',
+        ], [
+            'users.*.default_wages.*.integer' => 'مبلغ دستمزد نامعتبر است',
+            'users.*.default_wages.*.min' => 'مبلغ دستمزد نمی‌تواند منفی باشد',
+        ]);
+
+        DB::transaction(function () use ($request) {
+            foreach ($request->input('users') as $row) {
+                $wages = collect($row['default_wages'] ?? [])
+                    ->only(array_keys(UserProjectEarning::WORK_LABELS))
+                    ->map(fn($amount) => (int)$amount)
+                    ->filter(fn($amount) => $amount > 0);
+
+                User::where('id', $row['id'])->update(['default_wages' => $wages->isEmpty() ? null : $wages->toJson()]);
+            }
+        });
+
+        return $this->apiController->respondUpdated('دستمزدهای پیش‌فرض ذخیره شد');
+    }
 }

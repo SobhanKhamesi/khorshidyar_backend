@@ -149,7 +149,8 @@ class ProfileController extends Controller
         $earning = UserProjectEarning::findOrFail($id);
         $this->validateEarning($request);
 
-        $earning->update($this->earningAttributes($request));
+        // دستمزد خودکاری که مدیر ویرایش کرده، دستی محسوب می‌شود و با تغییر نصاب‌ها حذف نمی‌شود
+        $earning->update($this->earningAttributes($request) + ['is_auto' => false]);
 
         return $this->apiController->respondUpdated('دریافتی پروژه ویرایش شد', $earning);
     }
@@ -171,6 +172,7 @@ class ProfileController extends Controller
             'is_settled' => 'boolean',
             'settled_at' => 'nullable',
             'description' => 'nullable|string|max:1000',
+            'work_type' => ['nullable', Rule::in(array_keys(UserProjectEarning::WORK_LABELS))],
         ], [
             'installation_service_id.required' => 'پروژه (سرویس نصب) را انتخاب کنید',
             'amount.required' => 'مبلغ دریافتی را وارد کنید',
@@ -193,7 +195,7 @@ class ProfileController extends Controller
                 ? Verta::parse($request->input('settled_at'))->datetime()->format('Y-m-d')
                 : now()->format('Y-m-d')),
             'description' => $request->input('description'),
-        ];
+        ] + ($request->has('work_type') ? ['work_type' => $request->input('work_type')] : []);
     }
 
     private function earningData(UserProjectEarning $earning): array
@@ -203,6 +205,8 @@ class ProfileController extends Controller
             'installation_service_id' => $earning->installation_service_id,
             'project_title' => $earning->installationService ? $this->projectTitle($earning->installationService) : '-',
             'amount' => $earning->amount,
+            'work_type' => $earning->work_type,
+            'work_label' => $earning->work_label,
             'jalali_date' => $earning->jalali_date,
             'is_settled' => $earning->is_settled,
             'jalali_settled_at' => $earning->jalali_settled_at,

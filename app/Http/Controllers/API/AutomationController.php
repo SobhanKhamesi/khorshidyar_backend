@@ -12,7 +12,9 @@ use App\Models\AutomationIndustrialSurvey;
 use App\Models\AutomatonComment;
 use App\Models\Customer;
 use App\Models\FailureCategory;
+use App\Models\Product;
 use App\Models\User;
+use App\Services\ProjectProfitService;
 use App\Services\SmsService;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
@@ -48,7 +50,16 @@ class AutomationController extends Controller
         if ($status === Automation::SUCCESS)
             $query->with(['installationService' => fn($q) => $q->withoutEagerLoads()]);
 
-        return $this->apiController->respondData($query->get());
+        $list = $query->get();
+
+        // سود ناخالص و سود نهایی فقط برای مدیر
+        if ($this->canSeeProfit())
+            $list->each(function (Automation $automation) {
+                $automation->makeVisible(Automation::PROFIT_FIELDS);
+                $automation->installationService?->makeVisible('final_profit');
+            });
+
+        return $this->apiController->respondData($list);
     }
 
 
@@ -173,6 +184,7 @@ class AutomationController extends Controller
             'orders.*.orderProductId' => 'required|exists:products,id',
             'orders.*.orderCount' => 'required|numeric|min:1',
             'orders.*.orderPrice' => 'required|numeric|min:0',
+            'orders.*.orderPurchasePrice' => 'nullable|numeric|min:0',
             'final_price' => 'required_with:orders|nullable|numeric|min:0',
         ], self::PAYMENT_RULES), self::FINAL_PRICE_MESSAGES + [
             'final_price.required_with' => 'مبلغ نهایی را وارد نمایید',
@@ -214,6 +226,9 @@ class AutomationController extends Controller
             ]);
         });
 
+        // سود ناخالص اولیه ثابت می‌ماند؛ فقط سود نهایی سرویس نصب (که بر مبنای مبلغ نهایی فعلی است) به‌روز می‌شود
+        ProjectProfitService::refreshById($automation->installationService?->id);
+
         return $this->apiController->respondUpdated('اصلاحیه با موفقیت ثبت شد');
     }
 
@@ -231,18 +246,42 @@ class AutomationController extends Controller
 
 
     // وجود محصولات قبلاً با قانون exists در validate بررسی شده است
+    // قیمت خرید هر قلم در همین فاکتور ذخیره می‌شود (پیش‌فرض: قیمت خرید فعلی محصول) تا تغییر بعدی قیمت محصول روی آن اثر نگذارد
     public function addOrder(array $orders, Automation $create)
     {
         $finalPrice = 0;
+        $products = Product::withoutEagerLoads()
+            ->whereIn('id', array_column($orders, 'orderProductId'))
+            ->get(['id', 'kind', 'service_nature', 'purchase_price'])
+            ->keyBy('id');
+
         $create->orders()->delete();
         foreach ($orders as $order) {
+            $product = $products->get($order['orderProductId']);
+            $price = (int)round((float)$order['orderPrice']);
+            $purchasePrice = isset($order['orderPurchasePrice']) && $order['orderPurchasePrice'] !== ''
+                ? (int)round((float)$order['orderPurchasePrice'])
+                : ($product?->purchase_price !== null ? (int)$product->purchase_price : null);
+
+            // خدمت فقط یک مبلغ دارد: خدمت هزینه ← فقط مبلغ هزینه (قیمت خرید) و از مشتری دریافت نمی‌شود،
+            // خدمت دریافتی ← فقط مبلغ دریافتی (قیمت فروش) و برای ما هزینه‌ای ندارد
+            if ($product?->isService()) {
+                if ($product->isCostService()) {
+                    $purchasePrice = $purchasePrice ?: $price;
+                    $price = 0;
+                } else {
+                    $purchasePrice = 0;
+                }
+            }
+
             $create->orders()->create([
                 'product_id' => $order['orderProductId'],
-                'price' => $order['orderPrice'],
+                'price' => $price,
+                'purchase_price' => $purchasePrice,
                 'count' => $order['orderCount'],
             ]);
 
-            $finalPrice += $order['orderCount'] * $order['orderPrice'];
+            $finalPrice += $order['orderCount'] * $price;
         }
 
         return $finalPrice;
@@ -257,6 +296,7 @@ class AutomationController extends Controller
             'orders.*.orderProductId' => 'required|exists:products,id',
             'orders.*.orderCount' => 'required|numeric|min:1',
             'orders.*.orderPrice' => 'required|numeric|min:0',
+            'orders.*.orderPurchasePrice' => 'nullable|numeric|min:0',
         ], self::FINAL_PRICE_RULE), array_merge([
             'customer.required' => 'مشتری را انتخاب نمایید',
             'orders.required' => 'حداقل یک آیتم پیش فاکتور وارد کنید',
@@ -304,6 +344,7 @@ class AutomationController extends Controller
             'orders.*.orderProductId' => 'required|exists:products,id',
             'orders.*.orderCount' => 'required|numeric|min:1',
             'orders.*.orderPrice' => 'required|numeric|min:0',
+            'orders.*.orderPurchasePrice' => 'nullable|numeric|min:0',
         ], self::FINAL_PRICE_RULE), array_merge([
             'orders.required' => 'حداقل یک آیتم پیش فاکتور وارد کنید',
         ], self::FINAL_PRICE_MESSAGES));
@@ -427,7 +468,15 @@ class AutomationController extends Controller
     {
         // orders.product از قبل در $with مدل بارگذاری شده است
         $automation->load(['homeSurvey.gasCoolers', 'industrialSurvey.mainConsumers', 'customerSurvey']);
+        if ($this->canSeeProfit())
+            $automation->makeVisible(Automation::PROFIT_FIELDS);
+
         return $this->apiController->respondData($automation);
+    }
+
+    private function canSeeProfit(): bool
+    {
+        return (int)auth()->user()->role === User::ADMIN;
     }
 
     public function update(Request $request)

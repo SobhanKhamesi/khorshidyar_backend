@@ -18,7 +18,7 @@ class Order extends Model
 
 
     protected $fillable = [
-        'automation_id', 'product_id' , 'count', 'price','description'
+        'automation_id', 'product_id' , 'count', 'price', 'purchase_price', 'description'
     ];
 
     public $with = ['product'];

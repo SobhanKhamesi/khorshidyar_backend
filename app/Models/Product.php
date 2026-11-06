@@ -19,8 +19,21 @@ class Product extends Model
     protected $keyType = 'string';
 
 
+    // ---- kind ----
+    const KIND_GOODS = 1;   // کالا
+    const KIND_SERVICE = 2; // خدمت
+
+    // ---- service_nature (فقط برای خدمت) ----
+    const NATURE_COST = 1;   // از جنس هزینه (مثل حمل و نقل): از سود کم می‌شود
+    const NATURE_INCOME = 2; // از جنس دریافتی (مثل خدمات ارائه شده به مشتری): به درآمد اضافه می‌شود
+
+    const KIND_LABELS = [self::KIND_GOODS => 'کالا', self::KIND_SERVICE => 'خدمت'];
+    const NATURE_LABELS = [self::NATURE_COST => 'هزینه', self::NATURE_INCOME => 'دریافتی'];
+
     protected $fillable = [
         'name',
+        'kind',
+        'service_nature',
         'first_inventory',
         'purchase_price',
         'selling_price',
@@ -34,10 +47,48 @@ class Product extends Model
     ];
 
     public $appends = [
-        'inventory', 'sold_count','jalali_created','SabtKonande'
+        'inventory', 'sold_count','jalali_created','SabtKonande', 'kind_label', 'service_nature_label', 'service_amount'
     ];
 
     public $with = ['unit'];
+
+    protected $casts = [
+        'kind' => 'integer',
+        'service_nature' => 'integer',
+    ];
+
+    public function isService(): bool
+    {
+        return (int)$this->kind === self::KIND_SERVICE;
+    }
+
+    public function isCostService(): bool
+    {
+        return $this->isService() && (int)$this->service_nature === self::NATURE_COST;
+    }
+
+    /**
+     * خدمت قیمت خرید و فروش جداگانه ندارد و فقط یک مبلغ دارد:
+     * خدمت هزینه ← مبلغ هزینه (در purchase_price) / خدمت دریافتی ← مبلغ دریافتی (در selling_price)
+     */
+    public function getServiceAmountAttribute(): ?int
+    {
+        if (!$this->isService())
+            return null;
+
+        $amount = $this->isCostService() ? $this->purchase_price : $this->selling_price;
+        return $amount === null ? null : (int)$amount;
+    }
+
+    public function getKindLabelAttribute(): ?string
+    {
+        return self::KIND_LABELS[$this->kind ?? self::KIND_GOODS] ?? null;
+    }
+
+    public function getServiceNatureLabelAttribute(): ?string
+    {
+        return $this->isService() ? (self::NATURE_LABELS[$this->service_nature] ?? null) : null;
+    }
 
     // مقادیر کمکی scopeWithStats
     protected $hidden = ['reserved_count', 'sold_orders_count'];
@@ -58,8 +109,12 @@ class Product extends Model
             )], 'count');
     }
 
+    // خدمت موجودی انبار ندارد
     public function getInventoryAttribute()
     {
+        if ($this->isService())
+            return null;
+
         $notAvailableInStock = array_key_exists('reserved_count', $this->attributes)
             ? ($this->attributes['reserved_count'] ?? 0)
             : Order::where('product_id', $this->id)

@@ -50,13 +50,58 @@ class Automation extends Model
         'final_price' ,  // مبلغ نهایی
         'survey_type' ,  // نوع بازدید
         'description' ,
+        'gross_sale_amount' ,  // مبلغ فروش در لحظه‌ی فروش موفق
+        'gross_purchase_cost' ,  // جمع قیمت خرید اقلام در لحظه‌ی فروش موفق
+        'gross_profit' ,  // سود ناخالص اولیه (ثابت)
+        'gross_profit_at' ,
     ];
+
+    // اطلاعات سود فقط برای مدیر نمایش داده می‌شود (makeVisible در کنترلر)
+    const PROFIT_FIELDS = ['gross_sale_amount', 'gross_purchase_cost', 'gross_profit', 'gross_profit_at'];
+    protected $hidden = self::PROFIT_FIELDS;
     public $with = ['customer', 'orders', 'expert', 'failure', 'comments', 'contractItems', 'payments', 'cheques', 'user', 'intakeForm', 'contract'];
     public $appends = ['jalali_date', 'jalali_visit_date', 'sabtKonande', 'referrer_income'];
 
     protected $casts = [
         'referrer_percent' => 'integer',
+        'gross_sale_amount' => 'integer',
+        'gross_purchase_cost' => 'integer',
+        'gross_profit' => 'integer',
+        'gross_profit_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        // هر مسیری که اتوماسیون را به «فروش موفق» ببرد، سود ناخالص اولیه را ثبت می‌کند
+        static::updated(function (Automation $automation) {
+            if ($automation->wasChanged('status') && (int)$automation->status === self::SUCCESS)
+                $automation->snapshotGrossProfit();
+        });
+    }
+
+    /**
+     * ثبت سود ناخالص اولیه در لحظه‌ی فروش موفق؛ فقط یک بار ثبت می‌شود و
+     * اصلاحیه‌ی فاکتور، تغییر قیمت محصولات یا محاسبات سرویس نصب آن را تغییر نمی‌دهند.
+     * سود ناخالص = مبلغ نهایی (دستی) − جمع (تعداد × قیمت خرید) اقلام فاکتور
+     */
+    public function snapshotGrossProfit(): void
+    {
+        if ($this->gross_profit_at !== null)
+            return;
+
+        $orders = $this->orders()->get();
+        $cost = (int)round($orders->sum(fn(Order $o) => (float)$o->count * (int)$o->purchase_price));
+        $sale = $this->final_price !== null
+            ? (int)$this->final_price
+            : (int)round($orders->sum(fn(Order $o) => (float)$o->count * (int)$o->price));
+
+        $this->update([
+            'gross_sale_amount' => $sale,
+            'gross_purchase_cost' => $cost,
+            'gross_profit' => $sale - $cost,
+            'gross_profit_at' => now(),
+        ]);
+    }
 
     // سهم معرف از این پروژه (تومان) = مبلغ نهایی × درصد معرف همین پروژه
     public function getReferrerIncomeAttribute()

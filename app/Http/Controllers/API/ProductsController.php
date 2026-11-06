@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class ProductsController extends Controller
 {
@@ -32,15 +33,9 @@ class ProductsController extends Controller
     public function store(Request $request)
     {
 
-        $this->validate($request, [
-            'name' => 'required',
+        $this->validateProduct($request);
 
-        ], [
-            'name.required' => 'نام را وارد نمایید',
-        ]);
-
-
-        $create = Product::create([
+        $create = Product::create($this->kindAttributes($request) + [
             'name' => $request->input('name'),
             'first_inventory' => $this->apiHelper->getRealCount($request, 'firstInventory'),
                 'purchase_price' => $this->apiHelper->getRealPrice($request->input('purchasePrice')),
@@ -67,15 +62,11 @@ class ProductsController extends Controller
 
     public function update(Request $request)
     {
-        $this->validate($request, [
-            'name' => 'required',
-        ], [
-            'name.required' => 'نام را وارد نمایید',
-        ]);
+        $this->validateProduct($request);
 
         $data = Product::findOrFail($request->input('id'));
 
-        $update = $data->update([
+        $update = $data->update($this->kindAttributes($request) + [
             'name' => $request->input('name'),
             'first_inventory' => $this->apiHelper->getRealCount($request, 'firstInventory'),
             'purchase_price' => $this->apiHelper->getRealPrice($request->input('purchasePrice')),
@@ -91,6 +82,45 @@ class ProductsController extends Controller
         }
     }
 
+
+    private function validateProduct(Request $request): void
+    {
+        $this->validate($request, [
+            'name' => 'required',
+            'kind' => ['nullable', Rule::in([Product::KIND_GOODS, Product::KIND_SERVICE])],
+            'serviceNature' => [
+                'nullable',
+                Rule::requiredIf((int)$request->input('kind') === Product::KIND_SERVICE),
+                Rule::in([Product::NATURE_COST, Product::NATURE_INCOME]),
+            ],
+        ], [
+            'name.required' => 'نام را وارد نمایید',
+            'serviceNature.required' => 'مشخص کنید این خدمت از جنس هزینه است یا دریافتی',
+        ]);
+    }
+
+    /**
+     * خدمت موجودی انبار و قیمت خرید/فروش جداگانه ندارد؛ فقط یک «مبلغ» (serviceAmount) دارد که
+     * برای خدمت هزینه در purchase_price و برای خدمت دریافتی در selling_price ذخیره می‌شود.
+     * این آرایه با + ترکیب می‌شود و بر مقادیر بعدی (first_inventory و قیمت‌ها) اولویت دارد.
+     */
+    private function kindAttributes(Request $request): array
+    {
+        if ((int)$request->input('kind') !== Product::KIND_SERVICE)
+            return ['kind' => Product::KIND_GOODS, 'service_nature' => null];
+
+        $nature = (int)$request->input('serviceNature');
+        $raw = $this->apiHelper->getRealPrice((string)$request->input('serviceAmount'));
+        $amount = $raw === '' ? null : (int)$raw;
+
+        return [
+            'kind' => Product::KIND_SERVICE,
+            'service_nature' => $nature,
+            'first_inventory' => null,
+            'purchase_price' => $nature === Product::NATURE_COST ? $amount : null,
+            'selling_price' => $nature === Product::NATURE_INCOME ? $amount : null,
+        ];
+    }
 
     public
     function destroy(Request $request)

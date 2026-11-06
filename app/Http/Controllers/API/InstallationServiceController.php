@@ -8,11 +8,15 @@ use App\Models\AfterSalesService;
 use App\Models\Automation;
 use App\Models\Customer;
 use App\Models\InstallationService;
+use App\Models\InstallationServiceFinanceItem;
 use App\Models\InstallationServiceItem;
 use App\Models\InstallerAppointment;
+use App\Models\Product;
 use App\Models\User;
+use App\Models\UserProjectEarning;
 use App\Services\AfterSalesSmsNotifier;
 use App\Services\InstallationSmsNotifier;
+use App\Services\ProjectProfitService;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -53,7 +57,7 @@ class InstallationServiceController extends Controller
             $query->whereHas('activeAppointments', fn($q) => $q->where('user_id', auth()->id()))
                 ->where('stage', '!=', InstallationService::STAGE_DRAFT);
 
-        return $this->apiController->respondData($query->get());
+        return $this->apiController->respondData($this->present($query->get()));
     }
 
     // کارتابل سرویس نصب نصاب (کارهایی که الان منتظر اقدام او هستند)
@@ -66,7 +70,7 @@ class InstallationServiceController extends Controller
             ->orderbyDesc('updated_at')
             ->get();
 
-        return $this->apiController->respondData($list);
+        return $this->apiController->respondData($this->present($list));
     }
 
     public function customerAutomations(Request $request, $customerId)
@@ -117,6 +121,11 @@ class InstallationServiceController extends Controller
                 $this->syncItems($service, InstallationServiceItem::TYPE_REQUIRED, $request->input('items', []));
                 $service->logStage($stage);
 
+                // خدمات هزینه‌دار فاکتور فروش (مثل حمل و نقل) به هزینه‌های جانبی پروژه منتقل می‌شوند
+                ProjectProfitService::importInvoiceServices($service);
+                ProjectProfitService::syncWages($service);
+                ProjectProfitService::refresh($service);
+
                 return [$service, $changed];
             });
         } catch (\Exception $e) {
@@ -127,7 +136,7 @@ class InstallationServiceController extends Controller
 
         return $this->apiController->respondCreated(
             $this->messageWithWarnings($refer ? 'سرویس نصب ثبت و به نصاب ارجاع شد' : 'با موفقیت ایجاد شد', $warnings),
-            $service->load(self::RELATIONS)
+            $this->present($service->load(self::RELATIONS))
         );
     }
 
@@ -158,6 +167,12 @@ class InstallationServiceController extends Controller
                     $service->logStage(InstallationService::STAGE_ASSIGNED);
                 }
 
+                // با تغییر فروش مرتبط، خدمات منتقل شده از فاکتور قبلی با فاکتور جدید جایگزین می‌شوند
+                if ($service->wasChanged(['automation_id', 'purchase_source']))
+                    ProjectProfitService::importInvoiceServices($service);
+                ProjectProfitService::syncWages($service);
+                ProjectProfitService::refresh($service);
+
                 return $changed;
             });
         } catch (\Exception $e) {
@@ -171,7 +186,7 @@ class InstallationServiceController extends Controller
 
         return $this->apiController->respondUpdated(
             $this->messageWithWarnings($refer ? 'سرویس نصب به نصاب ارجاع شد' : 'با موفقیت ویرایش شد', $warnings),
-            $service->load(self::RELATIONS)
+            $this->present($service->load(self::RELATIONS))
         );
     }
 
@@ -182,7 +197,7 @@ class InstallationServiceController extends Controller
         if ($this->isInstaller() && !$service->isAssignedTo(auth()->id()))
             return $this->apiController->respondForbidden();
 
-        return $this->apiController->respondData($service);
+        return $this->apiController->respondData($this->present($service));
     }
 
     public function destroy($id)
@@ -238,13 +253,14 @@ class InstallationServiceController extends Controller
             $this->syncItems($service, InstallationServiceItem::TYPE_USED, $request->input('items'));
             $service->update(['stage' => $nextStage]);
             $service->logStage($nextStage, $request->input('description'));
+            ProjectProfitService::refresh($service);
         });
 
         return $this->apiController->respondUpdated(
             $nextStage === InstallationService::STAGE_UNDER_REVIEW
                 ? 'رفع عیوب ثبت و برای بررسی مجدد به کارشناس فنی ارسال شد'
                 : 'اقلام مصرفی ثبت و به مدیر ارجاع شد',
-            $service->load(self::RELATIONS)
+            $this->present($service->load(self::RELATIONS))
         );
     }
 
@@ -273,9 +289,11 @@ class InstallationServiceController extends Controller
                 'stage' => InstallationService::STAGE_UNDER_REVIEW,
             ]);
             $service->logStage(InstallationService::STAGE_UNDER_REVIEW, $request->input('description'));
+            // دستمزد بررسی کارشناس فنی (در صورت تعریف در تنظیمات دستمزد)
+            ProjectProfitService::syncWages($service);
         });
 
-        return $this->apiController->respondUpdated('برای بررسی به کارشناس فنی ارسال شد', $service->load(self::RELATIONS));
+        return $this->apiController->respondUpdated('برای بررسی به کارشناس فنی ارسال شد', $this->present($service->load(self::RELATIONS)));
     }
 
     // کارشناس فنی پروژه را تایید می‌کند یا برای رفع عیوب به نصاب برمی‌گرداند
@@ -306,7 +324,7 @@ class InstallationServiceController extends Controller
 
         return $this->apiController->respondUpdated(
             $approved ? 'پروژه تایید شد' : 'پروژه برای رفع عیوب به نصاب برگردانده شد',
-            $service->load(self::RELATIONS)
+            $this->present($service->load(self::RELATIONS))
         );
     }
 
@@ -331,6 +349,7 @@ class InstallationServiceController extends Controller
                 ->where('status', InstallerAppointment::RESERVED)
                 ->update(['status' => InstallerAppointment::DONE]);
             $service->logStage(InstallationService::STAGE_COMPLETED, $request->input('description'));
+            ProjectProfitService::refresh($service);
 
             if (!$service->afterSalesServices()->exists()) {
                 return AfterSalesService::create([
@@ -357,7 +376,149 @@ class InstallationServiceController extends Controller
             $message .= $warnings ? '. ' . implode(' - ', $warnings) : ' و پیامک برای مشتری و نصاب ارسال شد';
         }
 
-        return $this->apiController->respondUpdated($message, $service->load(self::RELATIONS));
+        return $this->apiController->respondUpdated($message, $this->present($service->load(self::RELATIONS)));
+    }
+
+    // ================= سود و زیان پروژه (فقط مدیر) =================
+
+    public function finance($id)
+    {
+        if (!$this->isAdmin())
+            return $this->apiController->respondForbidden();
+
+        $service = InstallationService::with('customer')->findOrFail($id);
+
+        return $this->apiController->respondData(ProjectProfitService::breakdown($service) + [
+                'id' => $service->id,
+                'customer_name' => $service->customer?->fullName ?? $service->customer?->name,
+                'stage' => $service->stage,
+                'stage_label' => $service->stage_label,
+                // افرادی که در پروژه کار کرده‌اند (برای ثبت دستمزد)
+                'participants' => $this->participantOptions($service),
+            ]);
+    }
+
+    // ثبت هزینه یا دریافتی جانبی؛ می‌تواند یکی از خدمات تعریف شده در محصولات باشد یا عنوان آزاد
+    public function storeFinanceItem(Request $request, $id)
+    {
+        if (!$this->isAdmin())
+            return $this->apiController->respondForbidden();
+
+        $service = InstallationService::findOrFail($id);
+        $attributes = $this->validateFinanceItem($request);
+
+        InstallationServiceFinanceItem::create($attributes + [
+                'installation_service_id' => $service->id,
+                'source' => InstallationServiceFinanceItem::SOURCE_MANUAL,
+                'user_id' => auth()->id(),
+            ]);
+
+        return $this->apiController->respondCreated('با موفقیت ثبت شد');
+    }
+
+    public function updateFinanceItem(Request $request, $id, $itemId)
+    {
+        if (!$this->isAdmin())
+            return $this->apiController->respondForbidden();
+
+        $item = InstallationServiceFinanceItem::where('installation_service_id', $id)->findOrFail($itemId);
+        $item->update($this->validateFinanceItem($request));
+
+        return $this->apiController->respondUpdated('با موفقیت ویرایش شد');
+    }
+
+    public function destroyFinanceItem($id, $itemId)
+    {
+        if (!$this->isAdmin())
+            return $this->apiController->respondForbidden();
+
+        InstallationServiceFinanceItem::where('installation_service_id', $id)->findOrFail($itemId)->delete();
+
+        return $this->apiController->respondDeleted();
+    }
+
+    // ویرایش قیمت خرید واحد اقلام این پروژه (قیمت در همین پروژه ذخیره می‌شود و روی محصول اثری ندارد)
+    public function updateItemPrices(Request $request, $id)
+    {
+        if (!$this->isAdmin())
+            return $this->apiController->respondForbidden();
+
+        $service = InstallationService::findOrFail($id);
+
+        $this->validate($request, [
+            'items' => 'required|array',
+            'items.*.id' => 'required|string',
+            'items.*.unit_purchase_price' => 'required|numeric|min:0',
+        ], [
+            'items.*.unit_purchase_price.required' => 'قیمت خرید واحد را وارد کنید',
+        ]);
+
+        DB::transaction(function () use ($request, $service) {
+            foreach ($request->input('items') as $row) {
+                $item = $service->installationServiceItems()->find($row['id']);
+                if (!$item)
+                    continue;
+
+                // قیمت یک کالا در اقلام پیش‌نیاز و مصرفی همین پروژه یکسان نگه داشته می‌شود
+                $service->installationServiceItems()->where('product_id', $item->product_id)
+                    ->update(['unit_purchase_price' => (int)round((float)$row['unit_purchase_price'])]);
+            }
+            ProjectProfitService::refresh($service);
+        });
+
+        return $this->apiController->respondUpdated('قیمت خرید اقلام ویرایش شد');
+    }
+
+    private function validateFinanceItem(Request $request): array
+    {
+        $this->validate($request, [
+            'direction' => ['required', Rule::in([InstallationServiceFinanceItem::COST, InstallationServiceFinanceItem::INCOME])],
+            'product_id' => ['nullable', Rule::exists('products', 'id')->where('kind', Product::KIND_SERVICE)],
+            'title' => 'required_without:product_id|nullable|string|max:255',
+            'amount' => 'required|integer|min:1',
+            'description' => 'nullable|string|max:1000',
+        ], [
+            'direction.required' => 'نوع (هزینه یا دریافتی) را مشخص کنید',
+            'product_id.exists' => 'خدمت انتخاب شده معتبر نیست',
+            'title.required_without' => 'عنوان را وارد کنید یا یک خدمت انتخاب کنید',
+            'amount.required' => 'مبلغ را وارد کنید',
+            'amount.integer' => 'مبلغ نامعتبر است',
+            'amount.min' => 'مبلغ باید بیشتر از صفر باشد',
+        ]);
+
+        $product = $request->filled('product_id') ? Product::withoutEagerLoads()->find($request->input('product_id')) : null;
+
+        return [
+            'product_id' => $product?->id,
+            'direction' => (int)$request->input('direction'),
+            'title' => $request->filled('title') ? $request->input('title') : $product->name,
+            'amount' => (int)$request->input('amount'),
+            'description' => $request->input('description'),
+        ];
+    }
+
+    // نصاب‌ها و کارشناس فنی پروژه، به همراه نوع کار، برای انتخاب در فرم دستمزد
+    private function participantOptions(InstallationService $service): array
+    {
+        $options = [];
+        $roleWork = [
+            InstallationService::ROLE_PANEL => UserProjectEarning::WORK_PANEL,
+            InstallationService::ROLE_WIRING => UserProjectEarning::WORK_WIRING,
+            InstallationService::ROLE_COMMISSIONING => UserProjectEarning::WORK_COMMISSIONING,
+        ];
+
+        $service->activeAppointments()->whereIn('type', array_keys($roleWork))->get()
+            ->each(function (InstallerAppointment $a) use (&$options, $service, $roleWork) {
+                $work = $service->installer_mode === InstallationService::MODE_SINGLE ? UserProjectEarning::WORK_PROJECT : $roleWork[$a->type];
+                $options[] = ['user_id' => $a->user_id, 'user_name' => $a->installer?->name, 'work_type' => $work,
+                    'work_label' => UserProjectEarning::WORK_LABELS[$work]];
+            });
+
+        if ($service->technicalExpert)
+            $options[] = ['user_id' => $service->technical_expert_id, 'user_name' => $service->technicalExpert->name,
+                'work_type' => UserProjectEarning::WORK_REVIEW, 'work_label' => UserProjectEarning::WORK_LABELS[UserProjectEarning::WORK_REVIEW]];
+
+        return $options;
     }
 
     // ================= کمکی =================
@@ -539,17 +700,50 @@ class InstallationServiceController extends Controller
         return $changed;
     }
 
+    /**
+     * قیمت خرید واحد هر قلم هم ذخیره می‌شود: اگر همین کالا قبلاً در پروژه قیمت داشته (مثلاً مدیر ویرایش کرده) حفظ می‌شود،
+     * وگرنه از فاکتور فروش یا قیمت خرید فعلی محصول خوانده می‌شود.
+     */
     private function syncItems(InstallationService $service, int $type, array $items): void
     {
+        $items = collect($items)->filter(fn($item) => !empty($item['product_id']) && !empty($item['quantity']));
+
+        $existingPrices = $service->installationServiceItems()->whereNotNull('unit_purchase_price')
+            ->orderBy('type', $type === InstallationServiceItem::TYPE_USED ? 'desc' : 'asc')
+            ->get(['product_id', 'unit_purchase_price'])
+            ->unique('product_id')
+            ->pluck('unit_purchase_price', 'product_id');
+        $defaultPrices = ProjectProfitService::unitPrices($service, $items->pluck('product_id')->all());
+
         $service->installationServiceItems()->where('type', $type)->delete();
 
-        collect($items)
-            ->filter(fn($item) => !empty($item['product_id']) && !empty($item['quantity']))
-            ->each(fn($item) => InstallationServiceItem::create([
-                'installation_service_id' => $service->id,
-                'product_id' => $item['product_id'],
-                'type' => $type,
-                'quantity' => $item['quantity'],
-            ]));
+        $items->each(fn($item) => InstallationServiceItem::create([
+            'installation_service_id' => $service->id,
+            'product_id' => $item['product_id'],
+            'type' => $type,
+            'quantity' => $item['quantity'],
+            'unit_purchase_price' => $existingPrices->get($item['product_id']) ?? ($defaultPrices[$item['product_id']] ?? null),
+        ]));
+    }
+
+    /**
+     * اطلاعات مالی فقط برای مدیر: سود نهایی قابل مشاهده و قیمت خرید اقلام برای سایرین (مثل نصاب) مخفی می‌شود.
+     */
+    private function present($services)
+    {
+        $admin = $this->isAdmin();
+
+        collect($services instanceof InstallationService ? [$services] : $services)
+            ->each(function (InstallationService $service) use ($admin) {
+                if ($admin) {
+                    $service->makeVisible('final_profit');
+                    return;
+                }
+                foreach (['requiredItems', 'usedItems'] as $relation)
+                    if ($service->relationLoaded($relation))
+                        $service->getRelation($relation)->each->makeHidden('unit_purchase_price');
+            });
+
+        return $services;
     }
 }

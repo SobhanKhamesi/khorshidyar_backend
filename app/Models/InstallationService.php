@@ -92,16 +92,23 @@ class InstallationService extends Model
         'status',
         'stage',
         'completed_at',
+        'final_profit',        // سود نهایی پروژه (توسط ProjectProfitService محاسبه می‌شود)
+        'wage_generated_keys', // دستمزدهای خودکاری که قبلاً ایجاد شده‌اند تا پس از حذف دستی دوباره ساخته نشوند
     ];
 
     protected $with = ['technicalExpert'];
     public $appends = ['jalali_date', 'jalali_survey_date', 'stage_label'];
+
+    // اطلاعات سود فقط برای مدیر نمایش داده می‌شود
+    protected $hidden = ['final_profit', 'wage_generated_keys'];
 
     protected $casts = [
         'survey_date' => 'date',
         'completed_at' => 'datetime',
         'stage' => 'integer',
         'installer_mode' => 'integer',
+        'final_profit' => 'integer',
+        'wage_generated_keys' => 'array',
     ];
 
     public function customer(): BelongsTo
@@ -137,6 +144,16 @@ class InstallationService extends Model
     public function usedItems(): HasMany // اقلام مصرف شده توسط نصاب
     {
         return $this->hasMany(InstallationServiceItem::class)->where('type', InstallationServiceItem::TYPE_USED);
+    }
+
+    public function financeItems(): HasMany // هزینه‌ها و دریافتی‌های جانبی
+    {
+        return $this->hasMany(InstallationServiceFinanceItem::class)->orderBy('created_at');
+    }
+
+    public function earnings(): HasMany // دستمزد افراد از این پروژه
+    {
+        return $this->hasMany(UserProjectEarning::class)->orderBy('created_at');
     }
 
     public function histories(): HasMany

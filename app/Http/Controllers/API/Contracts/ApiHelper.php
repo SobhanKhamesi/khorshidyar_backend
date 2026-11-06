@@ -9,7 +9,7 @@ class ApiHelper extends Controller
 
     public function getRealPrice($input)
     {
-        $input = str_replace(",", "", $input);
+        $input = str_replace(",", "", (string)$input);
         $input = str_replace(" تومان", "", $input);
         return str_replace(" ریال", "", $input);
     }

@@ -45,7 +45,14 @@ class User extends Authenticatable
 
     protected $casts = [
         'mobiles' => 'array',
+        'default_wages' => 'array',
     ];
+
+    // دستمزد پیش‌فرض کاربر برای یک نوع کار (UserProjectEarning::WORK_*)؛ صفر یعنی تعریف نشده
+    public function defaultWageFor(string $work): int
+    {
+        return (int)(($this->default_wages ?? [])[$work] ?? 0);
+    }
 
     protected static function booted(): void
     {
@@ -83,8 +90,9 @@ class User extends Authenticatable
         $this->mobile = $mobiles[0] ?? null;
     }
 
+    // دستمزد پیش‌فرض فقط در تنظیمات دستمزد (مدیر) نمایش داده می‌شود
     protected $hidden = [
-        'password'
+        'password', 'default_wages',
     ];
 
     public function setPasswordAttribute($value)

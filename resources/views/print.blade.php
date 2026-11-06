@@ -115,6 +115,8 @@
                 $totalPrice = 0;
             @endphp
             @foreach ($accounting->orders as $item)
+                {{-- خدمات از جنس هزینه (مثل حمل و نقل) هزینه‌ی داخلی ما هستند و در فاکتور مشتری چاپ نمی‌شوند --}}
+                @continue($item->product->isCostService())
                 <tr>
                     <td>{{ $i }}</td>
                     <td style="font-weight: bold">{{ $item->product->name }}</td>
