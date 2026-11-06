@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\CustomerIntakeForm;
+use App\Models\Rating;
 use App\Models\SourceSms;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -26,8 +27,8 @@ class SmsTemplateSeeder extends Seeder
             'تشکر از خرید' => 'از اعتماد و خرید شما سپاسگزاریم.',
             // AutomationController: ارسال لینک فرم بازدید
             'فرم بازدید' => 'لطفاً فرم بازدید را از طریق لینک زیر تکمیل نمایید.',
-            // AfterSalesServiceController: ارسال لینک نظرسنجی خدمات پس از فروش
-            'نظرسنجی' => 'لطفاً با ثبت نظر خود درباره‌ی خدمات ارائه شده، ما را در بهبود خدمات یاری کنید.',
+            // AfterSalesServiceController: ارسال لینک نظرسنجی خدمات پس از فروش ({link} با لینک نظرسنجی جایگزین می‌شود)
+            Rating::SMS_TEMPLATE_TITLE => Rating::DEFAULT_SMS_TEXT,
             // RemindersController: تبریک تولد مشتری
             'تبریک تولد' => 'تولدت مبارک! این روز زیبا رو بهت تبریک می‌گیم و برات سالی پر از سلامتی و شادی آرزومندیم.',
             // IntakeFormController: لینک فرم اولیه ({link} با لینک فرم جایگزین می‌شود)

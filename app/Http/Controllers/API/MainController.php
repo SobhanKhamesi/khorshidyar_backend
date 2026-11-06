@@ -10,6 +10,7 @@ use App\Models\Automation;
 use App\Models\Check;
 use App\Models\Customer;
 use App\Models\InstallationService;
+use App\Models\Rating;
 use App\Models\Reminder;
 use Carbon\Carbon;
 
@@ -80,6 +81,8 @@ class MainController extends Controller
             'intake_form_count' => IntakeFormController::unseenSubmittedCount(),
             // قراردادهایی که مشتری امضا کرده و هنوز در کارتابل دیده نشده‌اند
             'contract_signed_count' => ContractController::unseenSignedCount(),
+            // نظرسنجی‌های خدمات پس از فروش با سطح «ضعیف» که دلیل نارضایتی‌شان هنوز بررسی نشده
+            'poor_rating_count' => Rating::needsReview()->count(),
         ];
 
         return $this->apiController->respondData($data);

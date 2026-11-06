@@ -30,7 +30,7 @@ class AfterSalesServiceController extends Controller
     public function list()
     {
         $list = AfterSalesService::query()
-            ->with(['customer', 'installationService', 'serviceType', 'responsibleUser'])
+            ->with(['customer', 'installationService', 'serviceType', 'responsibleUser', 'ratings.reviewer:id,name'])
             ->orderByDesc('created_at')
             ->orderBy('follow_up_date')
             ->get();
@@ -111,7 +111,7 @@ class AfterSalesServiceController extends Controller
         }
 
         $warnings = $notifier->notifyRegistered($service);
-        $message = 'با موفقیت ثبت شد و پیامک برای مشتری و نصاب ارسال شد';
+        $message = 'با موفقیت ثبت شد و پیامک برای مشتری و مسئول پیگیری ارسال شد';
         if ($warnings)
             $message = 'با موفقیت ثبت شد. ' . implode(' - ', $warnings);
 
@@ -170,6 +170,32 @@ class AfterSalesServiceController extends Controller
             "با موفقیت ویرایش شد",
             $service->load(['customer', 'installationService', 'serviceType', 'responsibleUser'])
         );
+    }
+
+    /**
+     * ثبت نتیجه بررسی دلیل نارضایتی مشتری برای نظرسنجی با سطح «ضعیف» (رفع آلارم)
+     */
+    public function reviewRating(Request $request, $ratingId)
+    {
+        $rating = Rating::findOrFail($ratingId);
+
+        $this->validate($request, [
+            'review_description' => 'required|string|max:2000',
+        ], [
+            'review_description.required' => 'دلیل نارضایتی و نتیجه بررسی را وارد کنید',
+            'review_description.max' => 'متن بررسی بیش از حد طولانی است',
+        ]);
+
+        if ($rating->level !== Rating::LEVEL_POOR)
+            return $this->apiController->respondError('فقط نظرسنجی‌های با سطح «ضعیف» نیاز به بررسی دارند');
+
+        $rating->update([
+            'review_description' => $request->input('review_description'),
+            'reviewed_by' => auth()->id(),
+            'reviewed_at' => now(),
+        ]);
+
+        return $this->apiController->respondUpdated('نتیجه بررسی نارضایتی ثبت شد', $rating->load('reviewer:id,name'));
     }
 
     public function show($id)
@@ -246,16 +272,13 @@ class AfterSalesServiceController extends Controller
 
     public function Sms(AfterSalesService $service)
     {
-        $sms = SourceSms::where('title', 'نظرسنجی')->first();
-
-        if (!$sms)
-            return $this->apiController->respondError("قالب sms برای 'نظرسنجی' ثبت نشده است.");
-
         $new_rating = Rating::getOrCreateFor($service);
+        $link = rtrim(config('services.frontend_url'), '/') . '/survey/' . $new_rating->token;
 
+        // جای لینک در متن با {link} در قالب «نظرسنجی» (تنظیمات پیامک) مشخص می‌شود
         $customer = $service->customer;
-        $content = $customer->greeting_name . "\n\n" . $sms->description . "\n"
-            . "لینک صفحه نظرسنجی : " . rtrim(config('services.frontend_url'), '/') . '/survey/' . $new_rating->token;
+        $content = $customer->greeting_name . "\n\n"
+            . SourceSms::renderWithLink(Rating::SMS_TEMPLATE_TITLE, Rating::DEFAULT_SMS_TEXT, $link, 'لینک صفحه نظرسنجی : ');
 
         $create = app(SmsService::class)->sendAndLog($customer, $content);
 

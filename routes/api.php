@@ -313,6 +313,7 @@ Route::middleware('auth:sanctum')->group(callback: function () {
         Route::get('customer-installations/{customerId}', [AfterSalesServiceController::class, 'customerInstallations']);
         Route::post('store', [AfterSalesServiceController::class, 'store']);
         Route::put('complete/{id}', [AfterSalesServiceController::class, 'complete']);
+        Route::put('rating-review/{ratingId}', [AfterSalesServiceController::class, 'reviewRating']);
         Route::delete('destroy/{id}', [AfterSalesServiceController::class, 'destroy']);
     });
 

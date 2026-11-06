@@ -8,8 +8,8 @@ use Throwable;
 
 /**
  * پیامک‌های ثبت خدمات پس از فروش:
- *  - به مشتری: نام نصاب + شماره تماس نصاب + تاریخ مراجعه
- *  - به نصاب (مسئول خدمت): «کاری در کارتابل خدمات پس از فروش برای شما ثبت شده است»
+ *  - به مشتری: نام مسئول پیگیری + شماره تماس او + تاریخ مراجعه
+ *  - به مسئول پیگیری: «کاری در کارتابل خدمات پس از فروش برای شما ثبت شده است»
  */
 class AfterSalesSmsNotifier
 {
@@ -57,15 +57,21 @@ class AfterSalesSmsNotifier
         }
 
         if ($customer) {
-            $content = $customer->greeting_name . "\n\n"
-                . "درخواست خدمات پس از فروش شما ثبت شد.\n"
-                . "نصاب: {$installer->name}\n"
-                . "شماره تماس نصاب: " . ($installer->mobile ?: '-') . "\n"
-                . "تاریخ مراجعه: " . ($service->jalali_follow_up_date ?: '-');
+            // در پیامک خدمات پس از فروش از عنوان «مسئول پیگیری» استفاده می‌شود (نه نصاب)
+            $lines = [
+                'درخواست خدمات پس از فروش شما ثبت شد.',
+                "مسئول پیگیری: {$installer->name}",
+            ];
+            if ($installer->mobile)
+                $lines[] = "شماره تماس مسئول پیگیری: {$installer->mobile}";
+            if ($service->jalali_follow_up_date)
+                $lines[] = "تاریخ مراجعه: {$service->jalali_follow_up_date}";
+
+            $content = $customer->greeting_name . "\n\n" . implode("\n", $lines);
 
             $sms = $this->smsService->sendAndLog($customer, $content);
             if (!$sms->count)
-                $warnings[] = 'ارسال پیامک اطلاعات نصاب به مشتری ناموفق بود';
+                $warnings[] = 'ارسال پیامک اطلاعات مسئول پیگیری به مشتری ناموفق بود';
         }
 
         return $warnings;

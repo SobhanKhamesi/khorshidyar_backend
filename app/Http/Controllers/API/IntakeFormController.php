@@ -78,11 +78,9 @@ class IntakeFormController extends Controller
                 ]);
         });
 
-        $template = SourceSms::where('title', CustomerIntakeForm::SMS_TEMPLATE_TITLE)->value('description')
-            ?: CustomerIntakeForm::DEFAULT_SMS_TEXT;
-        $content = str_contains($template, '{link}')
-            ? str_replace('{link}', $form->link(), $template)
-            : $template . "\n\n" . $form->link();
+        $content = SourceSms::renderWithLink(
+            CustomerIntakeForm::SMS_TEMPLATE_TITLE, CustomerIntakeForm::DEFAULT_SMS_TEXT, $form->link()
+        );
 
         $sms = $this->smsService->sendAndLog($customer, $content);
         $form->update(['sms_sent' => $sms->count > 0]);
