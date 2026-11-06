@@ -13,6 +13,7 @@ use App\Http\Controllers\API\OpportunitiesController;
 use App\Http\Controllers\API\ProductCategoryController;
 use App\Http\Controllers\API\ContractController;
 use App\Http\Controllers\API\IntakeFormController;
+use App\Http\Controllers\API\ProfileController;
 use App\Http\Controllers\API\RatingController;
 use App\Http\Controllers\API\ReferrerController;
 use App\Http\Controllers\API\RemindersController;
@@ -87,6 +88,17 @@ Route::middleware('auth:sanctum')->group(callback: function () {
     Route::post('user/update-password', [UsersController::class, 'changePassword']);
     Route::post('user/update-info', [UsersController::class, 'changeInfo']);
     Route::post('users/quick-add', [UsersController::class, 'quickAdd']);
+
+    // پروفایل کاربر ({user} = شناسه کاربر یا me)
+    Route::prefix('profile')->group(function () {
+        Route::put('earnings/{id}', [ProfileController::class, 'updateEarning']);
+        Route::delete('earnings/{id}', [ProfileController::class, 'destroyEarning']);
+        Route::get('{user}', [ProfileController::class, 'show']);
+        Route::put('{user}', [ProfileController::class, 'update']);
+        Route::get('{user}/earnings', [ProfileController::class, 'earnings']);
+        Route::post('{user}/earnings', [ProfileController::class, 'storeEarning']);
+        Route::get('{user}/projects', [ProfileController::class, 'projects']);
+    });
 
     Route::get('expired-items', [MainController::class, 'getExpiredItems']);
 
