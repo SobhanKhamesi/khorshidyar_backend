@@ -9,6 +9,7 @@ use App\Models\Automation;
 use App\Models\AutomationContract;
 use App\Models\Sms;
 use App\Models\User;
+use App\Support\Access;
 use App\Services\SmsService;
 use Carbon\Carbon;
 use Hekmatinasser\Verta\Verta;
@@ -59,7 +60,7 @@ class ContractController extends Controller
             'signed_at' => $jalali($contract->signed_at),
             'signer_name' => $contract->signer_name,
             'signature' => $contract->signature,
-            'can_approve' => auth()->user()->role === User::ADMIN,
+            'can_approve' => Access::can('sales.approve_contract'),
         ];
     }
 
@@ -67,6 +68,7 @@ class ContractController extends Controller
 
     public function show(Automation $automation)
     {
+        Access::ensureAutomation($automation);
         $contract = $this->contractFor($automation);
 
         if ($contract->status === AutomationContract::SIGNED && !$contract->signed_seen_at)
@@ -78,6 +80,7 @@ class ContractController extends Controller
     // ذخیره پیش‌نویس؛ اگر قبلاً تایید شده باشد، نیاز به تایید مجدد ادمین دارد
     public function save(Request $request, Automation $automation)
     {
+        Access::ensureAutomation($automation);
         $this->validate($request, ['fields' => 'required|array']);
 
         $contract = $this->contractFor($automation);
@@ -104,7 +107,7 @@ class ContractController extends Controller
     // تایید ادمین: متن نهایی ثابت می‌شود و لینک قرارداد برای مشتری پیامک می‌شود
     public function approve(Automation $automation)
     {
-        if (auth()->user()->role !== User::ADMIN)
+        if (!Access::can('sales.approve_contract'))
             return $this->apiController->respondError('تایید قرارداد فقط توسط ادمین امکان‌پذیر است');
 
         $contract = $this->contractFor($automation);
@@ -133,6 +136,7 @@ class ContractController extends Controller
 
     public function resend(Automation $automation)
     {
+        Access::ensureAutomation($automation);
         $contract = $this->contractFor($automation);
         if ($contract->status !== AutomationContract::APPROVED)
             return $this->apiController->respondError('فقط قرارداد تایید شده و امضا نشده قابل ارسال است');
@@ -159,7 +163,9 @@ class ContractController extends Controller
     // قراردادهای امضا شده‌ای که هنوز در کارتابل دیده نشده‌اند (برای اعلان)
     public static function unseenSignedCount(): int
     {
-        return AutomationContract::where('status', AutomationContract::SIGNED)->whereNull('signed_seen_at')->count();
+        // فقط قراردادهای اتوماسیون‌هایی که کاربر به آن‌ها دسترسی دارد
+        return AutomationContract::where('status', AutomationContract::SIGNED)->whereNull('signed_seen_at')
+            ->whereHas('automation', fn($q) => Access::scopeAutomations($q))->count();
     }
 
     // ---------- مسیرهای عمومی (بدون ورود) ----------

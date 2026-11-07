@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\Controller;
 use App\Models\ServiceType;
@@ -29,6 +30,7 @@ class ServiceTypeController extends Controller
 
     public function quickAdd(Request $request)
     {
+        Access::ensureCan('settings.manage');
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255', Rule::unique('service_types', 'title')],
         ], [
@@ -47,6 +49,7 @@ class ServiceTypeController extends Controller
     }
     public function update(Request $request , ServiceType $serviceType)
     {
+        Access::ensureCan('settings.manage');
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255', Rule::unique('service_types', 'title')],
         ], [
@@ -66,6 +69,7 @@ class ServiceTypeController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('settings.manage');
         $service = ServiceType::findOrFail($request->input("id"));
         $service->delete();
         return $this->apiController->respondDeleted();

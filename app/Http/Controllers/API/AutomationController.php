@@ -16,6 +16,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Services\ProjectProfitService;
 use App\Services\SmsService;
+use App\Support\Access;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,8 +44,8 @@ class AutomationController extends Controller
             ->where('status', $status)
             ->orderByDesc('created_at');
 
-        if (auth()->user()->role == User::KARSHENAS_FANI && $status !== Automation::SUCCESS && $status !== Automation::FAILURE)
-            $query->where('user_id', auth()->id());
+        // ادمین و مدیر فروش همه؛ سایرین فقط اتوماسیون‌هایی که ثبت کرده یا کارشناس فنی آن بوده‌اند (در همه‌ی مراحل)
+        Access::scopeAutomations($query);
 
         // در لیست فروش‌های موفق، وضعیت ارجاع به سرویس نصب هم نمایش داده می‌شود
         if ($status === Automation::SUCCESS)
@@ -78,7 +79,9 @@ class AutomationController extends Controller
             'expert.required' => 'کارشناس فنی را انتخاب نمایید',
         ]);
 
+        Access::ensureSales();
         $customer = Customer::findOrFail($request->input('customer'));
+        Access::ensureCustomer($customer);
         $expert = User::findOrFail($request->input('expert'));
         $referrerPercent = $this->resolveReferrerPercent($request, $customer);
 
@@ -114,7 +117,7 @@ class AutomationController extends Controller
             'contract_items' => 'nullable|array',
         ], self::FINAL_PRICE_RULE, self::PAYMENT_RULES), self::FINAL_PRICE_MESSAGES);
 
-        $automation = Automation::findOrFail($request->input('id'));
+        $automation = $this->findAutomation($request->input('id'), true);
         $nextStatus = $automation->status + 1;
 
         DB::transaction(function () use ($request, $automation, $nextStatus) {
@@ -190,7 +193,10 @@ class AutomationController extends Controller
             'final_price.required_with' => 'مبلغ نهایی را وارد نمایید',
         ]);
 
-        $automation = Automation::findOrFail($request->input('id'));
+        $automation = $this->findAutomation($request->input('id'));
+        // اصلاحیه‌ی فروش موفق فقط برای مدیر و مدیر فروش
+        if ((int)$automation->status === Automation::SUCCESS)
+            Access::ensure(Access::canManageSalesStages(), 'اصلاحیه‌ی فروش موفق فقط برای مدیر مجاز است');
         $oldPrice = $automation->final_price;
         $invoiceChanged = $request->has('orders') || $request->filled('final_price');
         $paymentsChanged = $request->has('payments') || $request->has('cheques');
@@ -235,7 +241,7 @@ class AutomationController extends Controller
     // بازگرداندن فروش ناموفق به مرحله درخواست
     public function restore(Request $request)
     {
-        $automation = Automation::findOrFail($request->input('id'));
+        $automation = $this->findAutomation($request->input('id'), true);
         if ($automation->status !== Automation::FAILURE)
             return $this->apiController->respondError('فقط فروش‌های ناموفق قابل بازگردانی هستند');
 
@@ -302,7 +308,9 @@ class AutomationController extends Controller
             'orders.required' => 'حداقل یک آیتم پیش فاکتور وارد کنید',
         ], self::FINAL_PRICE_MESSAGES));
 
+        Access::ensureSales();
         $customer = Customer::findOrFail($request->input('customer'));
+        Access::ensureCustomer($customer);
         $orders = $request->input('orders');
         $description = $request->input('description');
         $referrerPercent = $this->resolveReferrerPercent($request, $customer);
@@ -349,7 +357,9 @@ class AutomationController extends Controller
             'orders.required' => 'حداقل یک آیتم پیش فاکتور وارد کنید',
         ], self::FINAL_PRICE_MESSAGES));
 
+        // درخواست ← پیش فاکتور: صاحب اتوماسیون؛ پیش فاکتور ← مذاکره: فقط مدیر و مدیر فروش
         $automation = Automation::findOrFail($request->input('id'));
+        $automation = $this->findAutomation($automation->id, (int)$automation->status !== Automation::REQUEST);
         $nextStatus = $automation->status + 1;
         $orders = $request->input('orders');
         $description = $request->input('description');
@@ -378,7 +388,7 @@ class AutomationController extends Controller
 
     public function success(Request $request)
     {
-        $automation = Automation::findOrFail($request->input('id'));
+        $automation = $this->findAutomation($request->input('id'), true);
 
         DB::transaction(function () use ($automation) {
             $automation->update(['status' => Automation::SUCCESS]);
@@ -395,6 +405,7 @@ class AutomationController extends Controller
 
     public function cancel(Automation $automation)
     {
+        Access::ensureAutomation($automation);
         $status = $automation->status;
 
         if ($status === Automation::SUCCESS || $status === Automation::FAILURE)
@@ -434,8 +445,10 @@ class AutomationController extends Controller
             ? FailureCategory::findOrFail($request->input('failure'))
             : null;
 
-        $data = Automation::findorFail($request->input('id'));
+        $data = $this->findAutomation($request->input('id'));
         $wasSuccess = (int)$data->status === Automation::SUCCESS;
+        if ($wasSuccess)
+            Access::ensure(Access::canManageSalesStages(), 'تبدیل فروش موفق به ناموفق فقط برای مدیر مجاز است');
 
         DB::transaction(function () use ($request, $data, $failure, $wasSuccess) {
             $data->update([
@@ -466,6 +479,7 @@ class AutomationController extends Controller
 
     public function show(Automation $automation)
     {
+        Access::ensureAutomation($automation);
         // orders.product از قبل در $with مدل بارگذاری شده است
         $automation->load(['homeSurvey.gasCoolers', 'industrialSurvey.mainConsumers', 'customerSurvey']);
         if ($this->canSeeProfit())
@@ -474,9 +488,23 @@ class AutomationController extends Controller
         return $this->apiController->respondData($automation);
     }
 
+    /**
+     * اتوماسیون قابل دسترس کاربر؛ $managerOnly برای مراحلی که فقط مدیر و مدیر فروش انجام می‌دهند
+     * (پیش فاکتور ← مذاکره، تایید قرارداد، فروش موفق، بازگردانی فروش ناموفق)
+     */
+    private function findAutomation($id, bool $managerOnly = false): Automation
+    {
+        $automation = Automation::findOrFail($id);
+        Access::ensureAutomation($automation);
+        if ($managerOnly)
+            Access::ensure(Access::canManageSalesStages(), 'این مرحله فقط توسط مدیر یا مدیر فروش انجام می‌شود');
+
+        return $automation;
+    }
+
     private function canSeeProfit(): bool
     {
-        return (int)auth()->user()->role === User::ADMIN;
+        return Access::can('profit.view');
     }
 
     public function update(Request $request)
@@ -495,8 +523,9 @@ class AutomationController extends Controller
             'expert.required' => 'کارشناس فنی را انتخاب نمایید',
         ]);
 
-        $automation = Automation::findOrFail($request->input('id'));
+        $automation = $this->findAutomation($request->input('id'));
         $customer = Customer::findOrFail($request->input('customer'));
+        Access::ensureCustomer($customer);
         $expert = User::findOrFail($request->input('expert'));
         // اگر مشتری اتوماسیون عوض شده باشد، درصد قبلی متعلق به مشتری دیگر است و نباید حفظ شود
         $referrerPercent = $this->resolveReferrerPercent(
@@ -530,7 +559,7 @@ class AutomationController extends Controller
     {
         $this->validate($request, ['id' => 'required']);
 
-        $automation = Automation::findOrFail($request->input('id'));
+        $automation = $this->findAutomation($request->input('id'));
         if (!$automation->customer?->referrer_id)
             return $this->apiController->respondError('برای مشتری این پروژه معرفی ثبت نشده است');
 
@@ -564,7 +593,7 @@ class AutomationController extends Controller
 
     public function comments(Request $request)
     {
-        $leaveId = $request->input('id');
+        $leaveId = $this->findAutomation($request->input('id'))->id;
         $comments = AutomatonComment::where('automation_id', $leaveId)->orderBy('created_at', 'DESC')->get();
         return $this->apiController->respondData($comments);
     }
@@ -578,7 +607,7 @@ class AutomationController extends Controller
             'content.required' => 'کامنتی بنویسید'
         ]);
 
-        $ticket = Automation::findOrFail($request->input('id'));
+        $ticket = $this->findAutomation($request->input('id'));
 
         AutomatonComment::create([
             'automation_id' => $ticket->id,
@@ -594,6 +623,8 @@ class AutomationController extends Controller
     {
 
         $data = AutomatonComment::findOrFail($request->input('id'));
+        // حذف فقط برای مدیر
+        Access::ensureCan('sales.delete');
 
         if ($data->delete())
             return $this->apiController->respondDeleted();

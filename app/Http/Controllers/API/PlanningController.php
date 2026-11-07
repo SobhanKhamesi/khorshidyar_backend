@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -25,7 +26,8 @@ class PlanningController extends Controller
 
     public function index()
     {
-        $data = Planning::orderby('created_at', 'DESC')->get();
+        // هر کاربر فقط قرارهای خودش (مدیر همه)
+        $data = Access::scopeOwned(Planning::query())->orderby('created_at', 'DESC')->get();
         return $this->apiController->respondData($data);
     }
 
@@ -68,6 +70,7 @@ class PlanningController extends Controller
 
     public function show(Planning $planning)
     {
+        Access::ensureCanSeeOwned($planning);
         return $this->apiController->respondData($planning);
     }
 
@@ -89,6 +92,7 @@ class PlanningController extends Controller
         ]);
 
         $data = Planning::findOrFail($request->input('id'));
+        Access::ensureOwns($data);
 
 
         $update = $data->update([
@@ -112,6 +116,7 @@ class PlanningController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('personal.delete');
 
         $data = Planning::findOrFail($request->input('id'));
         if ($data->delete()) {

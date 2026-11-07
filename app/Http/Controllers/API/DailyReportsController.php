@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -26,9 +27,9 @@ class DailyReportsController extends Controller
     public function index($type)
     {
         if ($type == 'today') {
-            $data = DailyReport::whereDate('date', Carbon::today())->where('status', DailyReport::FINISHED)->orderbyDesc('created_at')->get();
+            $data = Access::scopeOwned(DailyReport::whereDate('date', Carbon::today()))->where('status', DailyReport::FINISHED)->orderbyDesc('created_at')->get();
         } else {
-            $data = DailyReport::where('status', DailyReport::FINISHED)->orderbyDesc('created_at')->get();
+            $data = Access::scopeOwned(DailyReport::where('status', DailyReport::FINISHED))->orderbyDesc('created_at')->get();
         }
         return $this->apiController->respondData($data);
     }
@@ -195,12 +196,14 @@ class DailyReportsController extends Controller
 
     public function show(DailyReport $dailyReport)
     {
+        Access::ensureCanSeeOwned($dailyReport);
         return $this->apiController->respondData($dailyReport);
     }
 
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('personal.delete');
         $data = DailyReport::findOrFail($request->input('id'));
         $data->items()->delete();
         if ($data->delete()) {

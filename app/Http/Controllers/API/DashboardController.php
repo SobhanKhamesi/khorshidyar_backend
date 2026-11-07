@@ -14,6 +14,7 @@ use App\Models\Order;
 use App\Models\Product;
 use App\Models\SourceCategory;
 use App\Models\User;
+use App\Support\Access;
 use Carbon\Carbon;
 use Hekmatinasser\Verta\Verta;
 
@@ -33,9 +34,10 @@ class DashboardController extends Controller
         $this->apiHelper = $apiHelper;
     }
 
+    // فقط داده‌های خود کاربر (همه به جز مدیر و مدیر فروش)؛ نام متد برای سازگاری با کد قبلی حفظ شده
     private function isTechnicalExpert(): bool
     {
-        return auth()->user()->role === User::KARSHENAS_FANI;
+        return !Access::seesAllSales();
     }
 
     public function getWidgets()
@@ -50,7 +52,7 @@ class DashboardController extends Controller
             ->pluck('total', 'status');
 
         $sales = Automation::query()->toBase()
-            ->when($onlyMine, fn($q) => $q->where('user_id', $userId))
+            ->when($onlyMine, fn($q) => $q->where(fn($w) => $w->where('user_id', $userId)->orWhere('expert_id', $userId)))
             ->whereIn('status', [Automation::SUCCESS, Automation::FAILURE])
             ->selectRaw('status, count(*) as total, sum(final_price) as price')
             ->groupBy('status')
@@ -93,6 +95,7 @@ class DashboardController extends Controller
     public function getInvoice()
     {
         $createdDates = Automation::query()->toBase()
+            ->when($this->isTechnicalExpert(), fn($q) => $q->where(fn($w) => $w->where('automation.user_id', auth()->id())->orWhere('automation.expert_id', auth()->id())))
             ->where('status', Automation::SUCCESS)
             ->whereNotNull('final_price')
             ->whereDate('created_at', '>=', Carbon::now()->subDays(30))
@@ -138,6 +141,8 @@ class DashboardController extends Controller
     public function getTopProducts()
     {
         $collection = Order::query()->toBase()
+            ->when($this->isTechnicalExpert(), fn($q) => $q->whereIn('automation_id', Automation::query()->toBase()->select('id')
+                ->where(fn($w) => $w->where('user_id', auth()->id())->orWhere('expert_id', auth()->id()))))
             ->groupBy('product_id')
             ->selectRaw('sum(count) as total, product_id')
             ->orderByDesc('total')
@@ -229,6 +234,7 @@ class DashboardController extends Controller
     public function getFailureCategories()
     {
         $collection = Automation::query()->toBase()
+            ->when($this->isTechnicalExpert(), fn($q) => $q->where(fn($w) => $w->where('automation.user_id', auth()->id())->orWhere('automation.expert_id', auth()->id())))
             ->groupBy('failure_id')
             ->selectRaw('count(*) as total, failure_id')
             ->orderByDesc('total')
@@ -254,6 +260,7 @@ class DashboardController extends Controller
     public function getBestCuctomer()
     {
         $collection = Automation::query()->toBase()
+            ->when($this->isTechnicalExpert(), fn($q) => $q->where(fn($w) => $w->where('automation.user_id', auth()->id())->orWhere('automation.expert_id', auth()->id())))
             ->where('status', Automation::SUCCESS)
             ->groupBy('customer_id')
             ->selectRaw('sum(final_price) as total, customer_id')
@@ -281,6 +288,7 @@ class DashboardController extends Controller
     public function getTopSeller()
     {
         $collection = Automation::query()->toBase()
+            ->when($this->isTechnicalExpert(), fn($q) => $q->where(fn($w) => $w->where('automation.user_id', auth()->id())->orWhere('automation.expert_id', auth()->id())))
             ->where('status', Automation::SUCCESS)
             ->groupBy('user_id')
             ->selectRaw('sum(final_price) as total, user_id')
@@ -308,7 +316,7 @@ class DashboardController extends Controller
     // فقط برای مدیر محاسبه می‌شود
     public function getReport()
     {
-        if (auth()->user()->role !== User::ADMIN)
+        if (!Access::can('dashboard.reports'))
             return null;
 
         $collection = Call::query()->toBase()
@@ -338,6 +346,7 @@ class DashboardController extends Controller
     {
         $collection = Automation::query()->toBase()
             ->join('customers', 'automation.customer_id', '=', 'customers.id')
+            ->when($this->isTechnicalExpert(), fn($q) => $q->where(fn($w) => $w->where('automation.user_id', auth()->id())->orWhere('automation.expert_id', auth()->id())))
             ->join('source_categories', 'customers.source_id', '=', 'source_categories.id')
             ->where('automation.status', Automation::SUCCESS)
             ->groupBy('customers.source_id', 'source_categories.title')

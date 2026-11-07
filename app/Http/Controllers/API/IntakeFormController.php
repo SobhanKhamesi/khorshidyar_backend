@@ -13,6 +13,7 @@ use App\Models\Sms;
 use App\Models\SourceSms;
 use App\Services\SmsService;
 use Carbon\Carbon;
+use App\Support\Access;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -49,8 +50,12 @@ class IntakeFormController extends Controller
             'customer.required_without' => 'مشتری را انتخاب نمایید',
         ]);
 
+        Access::ensureSales();
         $automation = $request->input('automation') ? Automation::findOrFail($request->input('automation')) : null;
+        if ($automation)
+            Access::ensureAutomation($automation);
         $customer = $automation ? $automation->customer : Customer::findOrFail($request->input('customer'));
+        Access::ensureCustomer($customer);
 
         if (!$customer->contact_number)
             return $this->apiController->respondValidationError('برای این مشتری شماره تماس ثبت نشده است');
@@ -174,6 +179,7 @@ class IntakeFormController extends Controller
     // (پاسخ‌ها به‌عنوان فرم بازدید درخواست در automation/{id} برگردانده می‌شوند)
     public function answers(Automation $automation)
     {
+        Access::ensureAutomation($automation);
         $form = CustomerIntakeForm::where('automation_id', $automation->id)->latest()->first();
         if (!$form)
             return $this->apiController->respondError('فرم اولیه‌ای برای این درخواست ارسال نشده است');
@@ -193,7 +199,9 @@ class IntakeFormController extends Controller
     // فرم‌های تکمیل شده‌ای که هنوز در کارتابل دیده نشده‌اند (برای اعلان)
     public static function unseenSubmittedCount(): int
     {
-        return CustomerIntakeForm::whereNotNull('submitted_at')->whereNull('seen_at')->count();
+        // فرم‌های مشتریانی که کاربر به آن‌ها دسترسی دارد
+        return CustomerIntakeForm::whereNotNull('submitted_at')->whereNull('seen_at')
+            ->whereHas('customer', fn($q) => Access::scopeCustomers($q))->count();
     }
 
     // سوالات فرم «ثبت شده از مشتری» برای فرم ثبت/ویرایش درخواست در سامانه

@@ -26,7 +26,7 @@ class TargetingController extends Controller
     public function index()
     {
 
-        if (auth()->user()->role !== User::ADMIN) {
+        if (!\App\Support\Access::can('targeting.manage')) {
             $data = Targeting::where('user', auth()->id())->orderby('created_at', 'DESC')->get();
         } else {
             $data = Targeting::orderby('created_at', 'DESC')->get();
@@ -40,7 +40,7 @@ class TargetingController extends Controller
     public function store(Request $request)
     {
 
-        if (auth()->user()->role !== User::ADMIN)
+        if (!\App\Support\Access::can('targeting.manage'))
             return $this->apiController->respondForbidden();
 
         $this->validate($request, [
@@ -150,7 +150,7 @@ class TargetingController extends Controller
 
     public function show(Targeting $targeting)
     {
-        if (auth()->user()->role !== User::ADMIN && $targeting->user !== auth()->id())
+        if (!\App\Support\Access::can('targeting.manage') && $targeting->user !== auth()->id())
             return $this->apiController->respondForbidden();
 
         return $this->apiController->respondData($targeting);
@@ -159,7 +159,7 @@ class TargetingController extends Controller
 
     public function update(Request $request)
     {
-        if (auth()->user()->role !== User::ADMIN)
+        if (!\App\Support\Access::can('targeting.manage'))
             return $this->apiController->respondForbidden();
 
         $data = Targeting::findOrFail($request->input('id'));
@@ -181,7 +181,7 @@ class TargetingController extends Controller
 
     public function destroy(Request $request)
     {
-        if (auth()->user()->role !== User::ADMIN)
+        if (!\App\Support\Access::can('targeting.manage'))
             return $this->apiController->respondForbidden();
 
         $data = Targeting::findOrFail($request->input('id'));

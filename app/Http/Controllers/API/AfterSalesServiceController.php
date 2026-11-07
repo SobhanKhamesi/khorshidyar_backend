@@ -10,6 +10,7 @@ use App\Models\InstallationService;
 use App\Models\Rating;
 use App\Models\SourceSms;
 use App\Services\AfterSalesSmsNotifier;
+use App\Support\Access;
 use Hekmatinasser\Verta\Verta;
 use App\Services\SmsService;
 use Illuminate\Http\Request;
@@ -27,9 +28,10 @@ class AfterSalesServiceController extends Controller
         $this->apiController = $apiController;
     }
 
+    // مدیر همه؛ سایرین (نصاب/کارشناس) فقط خدماتی که مسئول آن هستند یا در آن نوبت دارند
     public function list()
     {
-        $list = AfterSalesService::query()
+        $list = Access::scopeAfterSales(AfterSalesService::query())
             ->with(['customer', 'installationService', 'serviceType', 'responsibleUser', 'ratings.reviewer:id,name'])
             ->orderByDesc('created_at')
             ->orderBy('follow_up_date')
@@ -40,9 +42,10 @@ class AfterSalesServiceController extends Controller
 
     public function customerHistory($customerId)
     {
-        Customer::findOrFail($customerId);
+        $customer = Customer::findOrFail($customerId);
+        Access::ensure(Access::can('after_sales.view_all') || Access::canSeeCustomer($customer));
 
-        $history = AfterSalesService::where('customer_id', $customerId)
+        $history = Access::scopeAfterSales(AfterSalesService::where('customer_id', $customerId))
             ->with(['serviceType', 'responsibleUser', 'installationService'])
             ->orderByDesc('created_at')
             ->get();
@@ -76,6 +79,7 @@ class AfterSalesServiceController extends Controller
      */
     public function customerInstallations($customerId)
     {
+        Access::ensureCan('after_sales.manage');
         Customer::findOrFail($customerId);
 
         $services = InstallationService::query()
@@ -93,8 +97,10 @@ class AfterSalesServiceController extends Controller
         return $this->apiController->respondData($services->values());
     }
 
+    // ثبت، ویرایش، حذف و بررسی نارضایتی فقط برای مدیر
     public function store(Request $request, AfterSalesSmsNotifier $notifier)
     {
+        Access::ensureCan('after_sales.manage');
         $this->applyProjectInstaller($request);
         $this->validatePayload($request, true);
 
@@ -123,6 +129,7 @@ class AfterSalesServiceController extends Controller
 
     public function update(Request $request, $id)
     {
+        Access::ensureCan('after_sales.manage');
         $service = AfterSalesService::findOrFail($id);
         $this->applyProjectInstaller($request);
         $this->validatePayload($request);
@@ -141,9 +148,11 @@ class AfterSalesServiceController extends Controller
         );
     }
 
+    // تکمیل پیگیری: مسئول همان خدمت یا مدیر
     public function complete(Request $request, $id)
     {
         $service = AfterSalesService::findOrFail($id);
+        Access::ensureAfterSale($service);
 
         $this->validate($request, [
             'resolution_description' => 'required|string',
@@ -177,6 +186,7 @@ class AfterSalesServiceController extends Controller
      */
     public function reviewRating(Request $request, $ratingId)
     {
+        Access::ensureCan('after_sales.review_ratings');
         $rating = Rating::findOrFail($ratingId);
 
         $this->validate($request, [
@@ -203,12 +213,14 @@ class AfterSalesServiceController extends Controller
         $service = AfterSalesService::with([
             'customer', 'installationService', 'serviceType', 'responsibleUser'
         ])->findOrFail($id);
+        Access::ensureAfterSale($service);
 
         return $this->apiController->respondData($service);
     }
 
     public function destroy($id)
     {
+        Access::ensureCan('after_sales.manage');
         $service = AfterSalesService::findOrFail($id);
         DB::transaction(function () use ($service) {
             $service->delete();

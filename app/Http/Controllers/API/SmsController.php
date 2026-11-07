@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -28,7 +29,7 @@ class SmsController extends Controller
     {
         $data = [];
 
-        if (auth()->user()->role == User::ADMIN) {
+        if (\App\Support\Access::can('sms.view_all')) {
             $data = Sms::orderby('created_at', 'DESC')->get();
         }
 
@@ -37,6 +38,7 @@ class SmsController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureSales();
 //        if (Sms::sum('count') > env('SMS_MAX_COUNT')) {
 //            return $this->apiController->respondError('تعداد پیامک ارسالی شما به حد نصاب رسیده است. لطفا با پشتیبانی تماس بگیرید');
 //        }

@@ -10,6 +10,7 @@ use App\Models\CustomerCategory;
 use App\Models\Referrer;
 use App\Models\Reminder;
 use App\Models\User;
+use App\Support\Access;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,7 +32,7 @@ class CustomersController extends Controller
     {
         $data = Customer::withStats()
             ->whereIn('status', [Customer::CUSTOMER, Customer::TO])
-            ->when(auth()->user()->role == User::KARSHENAS_FANI, fn($q) => $q->where('user_id', auth()->id()))
+            ->tap(fn($q) => Access::scopeCustomers($q))
             ->orderByDesc('created_at')
             ->get();
 
@@ -40,8 +41,9 @@ class CustomersController extends Controller
 
     public function getAllCustomersAndLeads()
     {
+        // انتخاب مشتری در فرم‌ها؛ مدیر همه، سایرین فقط مشتریان خودشان
         $data = Customer::withStats()
-            ->when(auth()->user()->role == User::KARSHENAS_FANI, fn($q) => $q->where('user_id', auth()->id()))
+            ->tap(fn($q) => Access::scopeCustomers($q))
             ->orderByDesc('created_at')
             ->get();
 
@@ -51,6 +53,7 @@ class CustomersController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureSales();
 
         $customerType = $request->input('type');
 
@@ -188,8 +191,7 @@ class CustomersController extends Controller
 
     public function show(Customer $customer)
     {
-        if (auth()->user()->role === User::KARSHENAS_FANI && $customer->user_id !== auth()->user()->id)
-            return $this->apiController->respondForbidden();
+        Access::ensureCustomer($customer);
 
         return $this->apiController->respondData($customer);
     }
@@ -199,9 +201,7 @@ class CustomersController extends Controller
 
 
         $data = Customer::findOrFail($request->input('id'));
-
-        if (auth()->user()->role === User::KARSHENAS_FANI && $data->user_id !== auth()->user()->id)
-            return $this->apiController->respondForbidden();
+        Access::ensureCustomer($data);
 
         $customerType = $request->input('type');
 
@@ -340,9 +340,8 @@ class CustomersController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('sales.delete');
         $data = Customer::findOrFail($request->input('id'));
-        if (auth()->user()->role === User::KARSHENAS_FANI && $data->user_id !== auth()->user()->id)
-            return $this->apiController->respondForbidden();
 
         if ($data->deleteWithRelations()) {
             return $this->apiController->respondDeleted();
@@ -353,6 +352,7 @@ class CustomersController extends Controller
 
     public function quickStore(Request $request)
     {
+        Access::ensureSales();
 
 
         $this->validate($request, [
@@ -397,16 +397,21 @@ class CustomersController extends Controller
 
     public function installation_services(Customer $customer)
     {
+        Access::ensureCustomer($customer);
         return $this->apiController->respondData($customer->installation_services);
     }
 
     public function after_sale_services(Customer $customer)
     {
+        Access::ensureCustomer($customer);
         return $this->apiController->respondData($customer->after_sale_services);
     }
 
     public function automations(Customer $customer , $status)
     {
-        return $this->apiController->respondData($customer->automations()->where("status" , $status)->get());
+        Access::ensureCustomer($customer);
+        return $this->apiController->respondData(
+            Access::scopeAutomations($customer->automations()->where("status", $status)->getQuery())->get()
+        );
     }
 }

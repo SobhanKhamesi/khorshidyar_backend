@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Accounting;
 use App\Models\Customer;
 use App\Models\User;
+use App\Support\Access;
 use Illuminate\Http\Request;
 
 class OpportunitiesController extends Controller
@@ -25,17 +26,16 @@ class OpportunitiesController extends Controller
 
     public function index()
     {
-        if (auth()->user()->role === User::KARSHENAS_FANI) {
-            $data = Customer::withStats()->where('status', Customer::OPPORTUNITY)->where('user_id', auth()->id())->orderbyDesc('created_at')->get();
-        } else {
-            $data = Customer::withStats()->where('status', Customer::OPPORTUNITY)->orderbyDesc('created_at')->get();
-        }
+        $data = Customer::withStats()->where('status', Customer::OPPORTUNITY)
+            ->tap(fn($q) => Access::scopeCustomers($q))
+            ->orderbyDesc('created_at')->get();
         return $this->apiController->respondData($data);
 
     }
 
     public function convert(Request $request)
     {
+        Access::ensureCan('accounting.manage');
         $invoice = Accounting::findOrFail($request->input('id'));
         $customer = Customer::findOrFail($invoice->customer_id);
         $invoice->update([

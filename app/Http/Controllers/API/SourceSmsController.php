@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -28,6 +29,7 @@ class SourceSmsController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureCan('settings.manage');
 
         $this->validate($request, [
             'title' => 'required'
@@ -59,6 +61,7 @@ class SourceSmsController extends Controller
     }
     public function destroy(Request $request)
     {
+        Access::ensureCan('settings.manage');
 
         $data = SourceSms::findOrFail($request->input('id'));
         if ($data) {
@@ -75,6 +78,7 @@ class SourceSmsController extends Controller
 
     public function update(Request $request)
     {
+        Access::ensureCan('settings.manage');
         $data = SourceSms::findOrFail($request->input('id'));
 
         $this->validate($request, [

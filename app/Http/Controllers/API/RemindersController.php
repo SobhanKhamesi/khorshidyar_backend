@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
+use App\Support\SystemReminders;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -25,7 +27,13 @@ class RemindersController extends Controller
 
     public function index()
     {
-        $data = Reminder::orderby('date', 'DESC')->get();
+        SystemReminders::sync();
+
+        // هر کاربر فقط یادآوری‌های خودش (مدیر همه)؛
+        // اعلان‌های سیستمی برای هر کاربر جداگانه ساخته می‌شوند، پس فقط اعلان‌های خود کاربر نمایش داده می‌شود (بدون تکرار برای مدیر)
+        $data = Access::scopeOwned(Reminder::query())
+            ->where(fn($q) => $q->notSystem()->orWhere('user_id', auth()->id()))
+            ->orderby('date', 'DESC')->orderBy('created_at', 'DESC')->get();
         return $this->apiController->respondData($data);
     }
 
@@ -62,6 +70,7 @@ class RemindersController extends Controller
 
     public function show(Reminder $reminder)
     {
+        Access::ensureCanSeeOwned($reminder);
         return $this->apiController->respondData($reminder);
 
     }
@@ -81,6 +90,7 @@ class RemindersController extends Controller
 
 
         $data = Reminder::findOrFail($request->input('id'));
+        Access::ensureOwns($data);
 
         $update = $data->update([
             'title' => $request->input('title'),
@@ -145,6 +155,7 @@ class RemindersController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('personal.delete');
         $data = Reminder::findOrFail($request->input('id'));
         if ($data->delete()) {
             return $this->apiController->respondDeleted();

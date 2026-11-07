@@ -12,6 +12,8 @@ use App\Models\Customer;
 use App\Models\InstallationService;
 use App\Models\Rating;
 use App\Models\Reminder;
+use App\Support\Access;
+use App\Support\SystemReminders;
 use Carbon\Carbon;
 
 class MainController extends Controller
@@ -26,10 +28,13 @@ class MainController extends Controller
     }
 
 
+    // آیتم‌های زنگوله منوی بالا: چک‌های سررسید شده و یادآوری‌های فعال (شامل اعلان‌های سیستمی)
     public function getExpiredItems()
     {
-        $dataChecks = Check::where('user_id', auth()->id())->whereDate('date', '<=', Carbon::now())->where('status', Check::PENDING)->get();
-        $dataReminder = Reminder::where('user_id', auth()->id())->whereDate('date', '<=', Carbon::now())->where('status', Reminder::ACTIVE)->get();
+        SystemReminders::sync();
+
+        $dataChecks = $this->expiredChecksQuery()->get();
+        $dataReminder = $this->expiredRemindersQuery()->get();
         $data = [];
 
 
@@ -47,6 +52,10 @@ class MainController extends Controller
                 'date' => $reminder->created_at,
                 'id' => $reminder->id,
                 'title' => $reminder->title,
+                // نوع یادآوری (عمومی، تولد، فرم اولیه، قرارداد امضا شده، نظرسنجی ضعیف) برای آیکون و مسیر کلیک
+                'reminder_type' => (int)$reminder->type,
+                'is_system' => $reminder->is_system,
+                'jalali_date' => $reminder->jalali_date,
             ];
         }
 
@@ -56,13 +65,28 @@ class MainController extends Controller
 
     }
 
+    private function expiredChecksQuery()
+    {
+        return Check::where('user_id', auth()->id())->whereDate('date', '<=', Carbon::now())->where('status', Check::PENDING);
+    }
+
+    private function expiredRemindersQuery()
+    {
+        return Reminder::where('user_id', auth()->id())->whereDate('date', '<=', Carbon::now())->where('status', Reminder::ACTIVE);
+    }
+
     public function checking()
     {
-        $darkhastCount = Automation::where('status', Automation::REQUEST)->count();
-        $pishfactorCount = Automation::where('status', Automation::PRE_INVOICE)->count();
-        $mozakereCount = Automation::where('status', Automation::NEGOTIATION)->count();
+        // اعلان‌های جدید (فرم اولیه، قرارداد امضا شده، نظرسنجی ضعیف) به‌صورت یادآوری برای کاربر ساخته می‌شوند
+        SystemReminders::sync();
 
-        $after_sale_count = AfterSalesService::query()
+        // همه‌ی شمارنده‌های منو بر اساس داده‌هایی است که کاربر به آن‌ها دسترسی دارد (ادمین: همه)
+        $automations = fn($status) => Access::scopeAutomations(Automation::withoutEagerLoads()->where('status', $status))->count();
+        $darkhastCount = $automations(Automation::REQUEST);
+        $pishfactorCount = $automations(Automation::PRE_INVOICE);
+        $mozakereCount = $automations(Automation::NEGOTIATION);
+
+        $after_sale_count = Access::scopeAfterSales(AfterSalesService::query())
             ->whereIn("follow_up_date", [Carbon::today(), Carbon::tomorrow()])
             ->whereIn("status", [AfterSalesService::STATUS_PENDING, AfterSalesService::STATUS_IN_PROGRESS])->count();
 
@@ -82,7 +106,12 @@ class MainController extends Controller
             // قراردادهایی که مشتری امضا کرده و هنوز در کارتابل دیده نشده‌اند
             'contract_signed_count' => ContractController::unseenSignedCount(),
             // نظرسنجی‌های خدمات پس از فروش با سطح «ضعیف» که دلیل نارضایتی‌شان هنوز بررسی نشده
-            'poor_rating_count' => Rating::needsReview()->count(),
+            'poor_rating_count' => Access::can('after_sales.review_ratings') ? Rating::needsReview()->count() : 0,
+            // تعداد آیتم‌های زنگوله (با تغییر آن، فرانت لیست زنگوله را دوباره دریافت می‌کند)
+            'notifications_count' => $this->expiredChecksQuery()->count() + $this->expiredRemindersQuery()->count(),
+            // نقش و دسترسی‌های فعلی کاربر (تغییرات ادمین در سطوح دسترسی بدون ورود مجدد اعمال می‌شود)
+            'role' => Access::role(),
+            'permissions' => Access::permissions(),
         ];
 
         return $this->apiController->respondData($data);

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -30,6 +31,7 @@ class SourceCategoriesController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureSales();
 
         $this->validate($request, [
             'title' => 'required'
@@ -61,6 +63,7 @@ class SourceCategoriesController extends Controller
     }
     public function destroy(Request $request)
     {
+        Access::ensureCan('settings.manage');
 
         $data = SourceCategory::findOrFail($request->input('id'));
         if ($data) {
@@ -77,6 +80,7 @@ class SourceCategoriesController extends Controller
 
     public function update(Request $request)
     {
+        Access::ensureCan('settings.manage');
         $data = SourceCategory::findOrFail($request->input('id'));
 
         $this->validate($request, [

@@ -24,6 +24,7 @@ use App\Http\Controllers\API\TicketController;
 use App\Http\Controllers\API\UnitController;
 use App\Http\Controllers\API\UserReportController;
 use App\Http\Controllers\API\UsersController;
+use App\Http\Controllers\API\AccessLevelController;
 use App\Http\Controllers\API\MainController;
 use App\Http\Controllers\API\DashboardController;
 use App\Http\Controllers\API\TargetingController;
@@ -92,6 +93,11 @@ Route::middleware('auth:sanctum')->group(callback: function () {
     // دستمزد پیش‌فرض نصاب‌ها و کارشناسان فنی (تنظیمات)
     Route::get('wage-settings', [UsersController::class, 'wageSettings']);
     Route::post('wage-settings', [UsersController::class, 'saveWageSettings']);
+
+    // سطوح دسترسی نقش‌ها (فقط ادمین)
+    Route::get('access-levels', [AccessLevelController::class, 'index']);
+    Route::post('access-levels', [AccessLevelController::class, 'update']);
+    Route::post('access-levels/{role}/reset', [AccessLevelController::class, 'reset'])->whereNumber('role');
 
     // پروفایل کاربر ({user} = شناسه کاربر یا me)
     Route::prefix('profile')->group(function () {

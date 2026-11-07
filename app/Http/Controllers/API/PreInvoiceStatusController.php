@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -25,6 +26,7 @@ class PreInvoiceStatusController extends Controller
 
     public function index(Accounting $accounting)
     {
+        Access::ensureCan('accounting.manage');
         $data = PreInvoiceStatus::where('invoice_id', $accounting->id)->orderbyDesc('created_at')->get();
         return $this->apiController->respondData($data);
     }
@@ -32,6 +34,7 @@ class PreInvoiceStatusController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureCan('accounting.manage');
 
         $data = Accounting::findOrFail($request->input('id'));
 
@@ -67,6 +70,7 @@ class PreInvoiceStatusController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('accounting.manage');
 
         $data = PreInvoiceStatus::findOrFail($request->input('id'));
         if ($data->delete()) {

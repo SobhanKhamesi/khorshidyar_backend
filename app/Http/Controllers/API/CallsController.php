@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -26,6 +27,7 @@ class CallsController extends Controller
 
     public function index(Customer $customer)
     {
+        Access::ensureCustomer($customer);
         $calls = Call::where('customer_id', $customer->id)->orderbyDesc('created_at')->get();
         $data = [
             'data' => $calls,
@@ -47,6 +49,7 @@ class CallsController extends Controller
         ]);
 
         $customer = Customer::findOrFail($request->input('id'));
+        Access::ensureCustomer($customer);
 
         $connectedName = '';
         if ($request->input('contacted') !== null && is_array($request->input('contacted')))
@@ -110,6 +113,7 @@ class CallsController extends Controller
 
     public function show(Call $call)
     {
+        Access::ensure(Access::canSeeCustomer($call->customer));
         return $this->apiController->respondData($call);
     }
 
@@ -126,7 +130,9 @@ class CallsController extends Controller
         ]);
 
         $data = Call::findOrFail($request->input('id'));
+        Access::ensureOwns($data);
         $customer = Customer::findOrFail($request->input('customer',));
+        Access::ensureCustomer($customer);
 
         $reFollowDate = null;
         if ($request->has('reFollowDate') && $request->input('reFollowDate') != null) {
@@ -168,6 +174,7 @@ class CallsController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('sales.delete');
         $data = Call::findOrFail($request->input('id'));
         if ($data->delete()) {
             return $this->apiController->respondDeleted();

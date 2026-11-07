@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -26,7 +27,7 @@ class TicketController extends Controller
 
     public function indexUndo()
     {
-        if (auth()->user()->role == User::ADMIN) {
+        if (Access::can('personal.view_all')) {
             $data = Ticket::whereIn('status', [0])->orderby('created_at', 'DESC')->get();
         } else {
             $data = Ticket::where(function ($query) {
@@ -45,7 +46,7 @@ class TicketController extends Controller
     {
 
 
-        if (auth()->user()->role == User::ADMIN) {
+        if (Access::can('personal.view_all')) {
             $data = Ticket::whereIn('status', [1])->orderby('created_at', 'DESC')->get();
         } else {
             $data = Ticket::where(function ($query) {
@@ -63,7 +64,7 @@ class TicketController extends Controller
     public function indexDoing()
     {
 
-        if (auth()->user()->role == User::ADMIN) {
+        if (Access::can('personal.view_all')) {
             $data = Ticket::whereIn('status',[2])->orderby('created_at', 'DESC')->get();
         } else {
             $data = Ticket::where(function ($query) {
@@ -118,11 +119,13 @@ class TicketController extends Controller
 
     public function show(Ticket $ticket)
     {
+        $this->ensureTicket($ticket);
         return $this->apiController->respondData($ticket);
     }
 
     public function update(Request $request)
     {
+        Access::ensureOwns(Ticket::findOrFail($request->input('id')));
         $customer = Customer::findOrFail($request->input('customer'));
         $user = User::find($request->input('userId'));
         if (!$user) {
@@ -160,6 +163,7 @@ class TicketController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('personal.delete');
 
         $data = Ticket::findOrFail($request->input('id'));
         if ($data->delete()) {
@@ -172,6 +176,7 @@ class TicketController extends Controller
 
     public function comments(Request $request)
     {
+        $this->ensureTicket(Ticket::findOrFail($request->input('id')));
         $letterId = $request->input('id');
         $comments = TicketComment::where('ticket_id', $letterId)->orderBy('created_at', 'DESC')->get();
         return $this->apiController->respondData($comments);
@@ -179,6 +184,7 @@ class TicketController extends Controller
 
     public function newComment(Request $request)
     {
+        $this->ensureTicket(Ticket::findOrFail($request->input('id')));
 
         $this->validate($request, [
             'content' => 'required'
@@ -208,6 +214,7 @@ class TicketController extends Controller
 
     public function deleteComment(Request $request)
     {
+        Access::ensureCan('personal.delete');
 
         $data = TicketComment::findOrFail($request->input('id'));
         if ($data) {
@@ -225,6 +232,7 @@ class TicketController extends Controller
 
     public function accept(Ticket $ticket)
     {
+        $this->ensureTicket($ticket);
         $status = $ticket->status;
 
         if ($status == Ticket::UNDO || $status == Ticket::DOING) {
@@ -244,6 +252,7 @@ class TicketController extends Controller
 
     public function attachments(Request $request)
     {
+        $this->ensureTicket(Ticket::findOrFail($request->input('id')));
 
         $ticket = Ticket::findOrFail($request->input('id'));
         $data = Attachment::where('ticket_id', $ticket->id)->orderby('created_at', 'DESC')->get();
@@ -253,6 +262,7 @@ class TicketController extends Controller
 
     public function newAttachment(Request $request)
     {
+        $this->ensureTicket(Ticket::findOrFail($request->input('id')));
         $ticket = Ticket::findOrFail($request->input('id'));
 
         $url = rand(100000, 9000000);
@@ -282,6 +292,7 @@ class TicketController extends Controller
 
     public function deleteAttachment(Request $request)
     {
+        Access::ensureCan('personal.delete');
 
         $data = Attachment::find($request->input('id'));
         if ($data) {
@@ -297,4 +308,10 @@ class TicketController extends Controller
     }
 
 
+
+    // ارجاع فقط برای ارجاع دهنده، گیرنده و مدیر قابل مشاهده است
+    private function ensureTicket(Ticket $ticket): void
+    {
+        Access::ensure(Access::can('personal.view_all') || in_array((string)auth()->id(), [(string)$ticket->userId, (string)$ticket->user_id], true));
+    }
 }

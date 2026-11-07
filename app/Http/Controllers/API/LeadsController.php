@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\Referrer;
 use App\Models\User;
+use App\Support\Access;
 use App\Models\CustomerCategory;
 use App\Models\Reminder;
 use App\Models\SourceCategory;
@@ -35,7 +36,7 @@ class LeadsController extends Controller
     {
         $data = Customer::withStats()
             ->where('status', Customer::LEAD)
-            ->when(auth()->user()->role === User::KARSHENAS_FANI, fn($q) => $q->where('user_id', auth()->id()))
+            ->tap(fn($q) => Access::scopeCustomers($q))
             ->orderByDesc('created_at')
             ->get();
         return $this->apiController->respondData($data);
@@ -45,6 +46,7 @@ class LeadsController extends Controller
 
     public function Sms(Customer $customer)
     {
+        Access::ensureCustomer($customer);
         $sms = $this->smsService->sendTemplateToCustomer('خوش آمدگویی', $customer);
         if (!$sms)
             return $this->apiController->respondError("قالب sms برای 'خوش آمدگویی' ثبت نشده است.");
@@ -54,6 +56,7 @@ class LeadsController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureSales();
 
         $leadType = $request->input('type');
 
@@ -251,8 +254,7 @@ class LeadsController extends Controller
 
     public function show(Customer $customer)
     {
-        if (auth()->user()->role === User::KARSHENAS_FANI && $customer->user_id !== auth()->user()->id)
-            return $this->apiController->respondForbidden();
+        Access::ensureCustomer($customer);
 
         return $this->apiController->respondData($customer);
     }
@@ -261,9 +263,7 @@ class LeadsController extends Controller
     {
 
         $data = Customer::findOrFail($request->input('id'));
-
-        if (auth()->user()->role === User::KARSHENAS_FANI && $data->user_id !== auth()->user()->id)
-            return $this->apiController->respondForbidden();
+        Access::ensureCustomer($data);
 
         $leadType = $request->input('type');
 
@@ -410,10 +410,8 @@ class LeadsController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('sales.delete');
         $data = Customer::findOrFail($request->input('id'));
-
-        if (auth()->user()->role === User::KARSHENAS_FANI && $data->user_id !== auth()->user()->id)
-            return $this->apiController->respondForbidden();
 
         if ($data->deleteWithRelations()) {
             return $this->apiController->respondDeleted();

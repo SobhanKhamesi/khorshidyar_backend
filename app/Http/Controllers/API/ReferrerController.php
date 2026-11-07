@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Models\Automation;
@@ -23,12 +24,14 @@ class ReferrerController extends Controller
 
     public function index()
     {
+        Access::ensureSales();
         $referrers = Referrer::all();
         return $this->apiController->respondData($referrers);
     }
 
     public function store(Request $request)
     {
+        Access::ensureSales();
         $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
@@ -45,6 +48,7 @@ class ReferrerController extends Controller
 
     public function update(Referrer $referrer, Request $request)
     {
+        Access::ensureSales();
         $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
@@ -60,6 +64,7 @@ class ReferrerController extends Controller
 
     public function destroy(Referrer $referrer)
     {
+        Access::ensureCan('sales.delete');
         // درصد پروژه‌های قبلی روی خود پروژه ثبت شده و دست نمی‌خورد
         Customer::where("referrer_id", $referrer->id)->update(['referrer_id' => null, 'referrer_percent' => null]);
         if ($referrer->delete()) {
@@ -74,7 +79,10 @@ class ReferrerController extends Controller
      */
     public function introduces(Referrer $referrer)
     {
-        $data = Customer::withStats()->where("referrer_id", $referrer->id)->orderByDesc('created_at')->get();
+        Access::ensureSales();
+        $data = Customer::withStats()->where("referrer_id", $referrer->id)
+            ->tap(fn($q) => Access::scopeCustomers($q))
+            ->orderByDesc('created_at')->get();
 
         $incomes = Automation::query()->toBase()
             ->whereIn('customer_id', $data->pluck('id'))
@@ -99,6 +107,7 @@ class ReferrerController extends Controller
      */
     public function introducesDetails(Customer $customer)
     {
+        Access::ensureCustomer($customer);
         $automations = Automation::query()
             ->withoutEagerLoads()
             ->where("customer_id", $customer->id)
@@ -125,6 +134,7 @@ class ReferrerController extends Controller
      */
     public function updatePercent(Customer $customer, Request $request)
     {
+        Access::ensureCustomer($customer);
         if (!$customer->referrer_id)
             return $this->apiController->respondError('برای این سرنخ/مشتری معرفی ثبت نشده است');
 

@@ -29,9 +29,20 @@ class Reminder extends Model
     const TYPE_GENERAL = 0;
     const TYPE_BIRTHDAY = 1;
 
+    // ---- یادآوری‌های سیستمی (اعلان‌هایی که خود سامانه می‌سازد؛ App\Support\SystemReminders) ----
+    const TYPE_INTAKE_FORM = 2;       // فرم اولیه توسط مشتری/سرنخ تکمیل شده
+    const TYPE_CONTRACT_SIGNED = 3;   // قرارداد توسط مشتری امضا شده
+    const TYPE_POOR_RATING = 4;       // نظرسنجی خدمات پس از فروش با رضایت «ضعیف»
+
+    const SYSTEM_TYPES = [
+        self::TYPE_INTAKE_FORM,
+        self::TYPE_CONTRACT_SIGNED,
+        self::TYPE_POOR_RATING,
+    ];
+
 
     public $appends = [
-        'jalali_date' , 'jalali_created'
+        'jalali_date' , 'jalali_created', 'is_system'
     ];
 
     protected $fillable = [
@@ -42,8 +53,24 @@ class Reminder extends Model
         'user_id',
         'type',
         'customer_id',
+        'source_id',
         'birthday_sms_sent',
     ];
+
+    public function getIsSystemAttribute(): bool
+    {
+        return in_array((int)$this->type, self::SYSTEM_TYPES, true);
+    }
+
+    public function scopeSystem($query)
+    {
+        return $query->whereIn('type', self::SYSTEM_TYPES);
+    }
+
+    public function scopeNotSystem($query)
+    {
+        return $query->whereNotIn('type', self::SYSTEM_TYPES);
+    }
 
 
     public function getJalaliDateAttribute()

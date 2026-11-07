@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -29,12 +30,14 @@ class AccountingController extends Controller
 
     public function index()
     {
+        Access::ensureCan('accounting.manage');
         $data = Accounting::whereNotIn('type', [Accounting::PRE_LEAD])->orderbyDesc('date')->get();
         return $this->apiController->respondData($data);
     }
 
     public function store(Request $request)
     {
+        Access::ensureCan('accounting.manage');
 
 
         $this->validate($request, [
@@ -190,12 +193,14 @@ class AccountingController extends Controller
 
     public function show(Accounting $accounting)
     {
+        Access::ensureCan('accounting.manage');
         return $this->apiController->respondData($accounting);
     }
 
 
     public function update(Request $request)
     {
+        Access::ensureCan('accounting.manage');
 
         $this->validate($request, [
             'type' => 'required',
@@ -337,6 +342,7 @@ class AccountingController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('accounting.manage');
 
         $data = Accounting::findOrFail($request->input('id'));
         $data->orders()->delete();

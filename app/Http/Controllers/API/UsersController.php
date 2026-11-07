@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -66,6 +67,7 @@ class UsersController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureAdmin(); // ایجاد کاربر فقط توسط مدیر
         $this->validate($request, [
             'name' => 'required',
             'username' => 'required',
@@ -248,6 +250,7 @@ class UsersController extends Controller
 
     public function quickAdd(Request $request)
     {
+        Access::ensureAdmin();
         $this->validate($request, [
             'name' => 'required',
             'username' => 'required',
@@ -309,6 +312,7 @@ class UsersController extends Controller
                 'token' => $token,
                 'id' => auth()->user()->id,
                 'role' => auth()->user()->role,
+                'permissions' => Access::permissions(),
                 'name' => auth()->user()->name,
                 'username' => auth()->user()->username,
                 'lastLoggedInDate' => $lastLoggedInDate,

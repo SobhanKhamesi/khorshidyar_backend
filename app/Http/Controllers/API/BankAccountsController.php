@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -32,6 +33,7 @@ class BankAccountsController extends Controller
 
     public function index()
     {
+        Access::ensureCan('accounting.manage');
         $data = BankAccount::orderby('created_at', 'DESC')->get();
         return $this->apiController->respondData($data);
 
@@ -40,6 +42,7 @@ class BankAccountsController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureCan('accounting.manage');
 
         $this->validate($request, [
             'bank_id' => 'required',
@@ -68,12 +71,14 @@ class BankAccountsController extends Controller
 
     public function show(BankAccount $bankAccount)
     {
+        Access::ensureCan('accounting.manage');
         return $this->apiController->respondData($bankAccount);
     }
 
 
     public function update(Request $request)
     {
+        Access::ensureCan('accounting.manage');
         $this->validate($request, [
             'bank_id' => 'required',
             'number' => 'required'
@@ -102,6 +107,7 @@ class BankAccountsController extends Controller
 
     public function destroy(Request $request)
     {
+        Access::ensureCan('accounting.manage');
         $data = BankAccount::findOrFail($request->input('id'));
         if ($data->delete()) {
             return $this->apiController->respondDeleted();

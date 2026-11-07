@@ -23,7 +23,7 @@ class User extends Authenticatable
     const KARSHENAS_FANI = 1;
     const NASSAB = 2;
     const KARSHENAS_FOROSH = 3;
-    const MODIR_FOROSH = 3;
+    const MODIR_FOROSH = 4; // قبلاً به اشتباه 3 (هم‌مقدار کارشناس فروش) بود
 
 
     const ACTIVE = 0;
@@ -35,7 +35,7 @@ class User extends Authenticatable
         self::KARSHENAS_FANI => 'کارشناس فنی',
         self::NASSAB => 'نصاب',
         self::KARSHENAS_FOROSH => 'کارشناس فروش',
-        4 => 'مدیر فروش',
+        self::MODIR_FOROSH => 'مدیر فروش',
     ];
 
     protected $fillable = [

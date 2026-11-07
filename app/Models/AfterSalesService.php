@@ -86,6 +86,11 @@ class AfterSalesService extends Model
         return $this->belongsTo(ServiceType::class);
     }
 
+    public function installerAppointments(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(InstallerAppointment::class, 'after_sale_service_id');
+    }
+
     public function responsibleUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'responsible_user_id');

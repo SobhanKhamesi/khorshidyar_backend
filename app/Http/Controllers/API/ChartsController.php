@@ -55,13 +55,14 @@ class ChartsController extends Controller
 
     private function onlyMine($query)
     {
-        return $query->when(auth()->user()->role === User::KARSHENAS_FANI, fn($q) => $q->where('user_id', auth()->id()));
+        // همه به جز مدیر و مدیر فروش فقط داده‌های خودشان را می‌بینند
+        return $query->when(!\App\Support\Access::seesAllSales(), fn($q) => $q->where('user_id', auth()->id()));
     }
 
     public function getProducts()
     {
         $collection = Order::query()
-            ->whereHas('automation', fn($query) => $query->where('status', Automation::SUCCESS))
+            ->whereHas('automation', fn($query) => $this->onlyMine($query->where('status', Automation::SUCCESS)))
             ->toBase()
             ->groupBy('product_id')
             ->selectRaw('SUM(count) as total, product_id')
@@ -90,7 +91,7 @@ class ChartsController extends Controller
     {
         $monthly = (bool)$request->input('monthly');
 
-        $createdDates = $this->applyDateRange(Automation::query()->toBase(), $request, 'created_at')
+        $createdDates = $this->applyDateRange($this->onlyMine(Automation::query()->toBase()), $request, 'created_at')
             ->pluck('created_at');
 
         $chart = [];
@@ -109,7 +110,7 @@ class ChartsController extends Controller
 
     public function getSeller(Request $request)
     {
-        $list = $this->applyDateRange(Automation::query()->toBase(), $request, 'created_at')
+        $list = $this->applyDateRange($this->onlyMine(Automation::query()->toBase()), $request, 'created_at')
             ->where('status', Automation::SUCCESS)
             ->groupBy('user_id')
             ->selectRaw('sum(final_price) as total, user_id')

@@ -17,6 +17,7 @@ use App\Models\UserProjectEarning;
 use App\Services\AfterSalesSmsNotifier;
 use App\Services\InstallationSmsNotifier;
 use App\Services\ProjectProfitService;
+use App\Support\Access;
 use Hekmatinasser\Verta\Verta;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -48,14 +49,10 @@ class InstallationServiceController extends Controller
 
     public function list()
     {
-        $query = InstallationService::query()
+        // مدیر همه؛ نصاب ← ارجاع شده به خودش؛ کارشناس فنی ← ارجاع شده برای بررسی به خودش
+        $query = Access::scopeInstallations(InstallationService::query())
             ->with(self::RELATIONS)
             ->orderbyDesc('created_at');
-
-        // نصاب فقط سرویس‌هایی را می‌بیند که به خودش ارجاع شده
-        if ($this->isInstaller())
-            $query->whereHas('activeAppointments', fn($q) => $q->where('user_id', auth()->id()))
-                ->where('stage', '!=', InstallationService::STAGE_DRAFT);
 
         return $this->apiController->respondData($this->present($query->get()));
     }
@@ -75,6 +72,7 @@ class InstallationServiceController extends Controller
 
     public function customerAutomations(Request $request, $customerId)
     {
+        Access::ensureCan('installation.manage');
         Customer::findOrFail($customerId);
 
         // فروشی که قبلاً به سرویس نصب ارجاع شده دوباره قابل انتخاب نیست (به جز سرویس در حال ویرایش)
@@ -92,6 +90,7 @@ class InstallationServiceController extends Controller
 
     public function customerInstallationServices($customerId)
     {
+        Access::ensureCan('installation.manage');
         Customer::findOrFail($customerId);
 
         $list = InstallationService::where('customer_id', $customerId)
@@ -103,8 +102,8 @@ class InstallationServiceController extends Controller
 
     public function store(Request $request)
     {
-        if ($this->isInstaller())
-            return $this->apiController->respondForbidden();
+        // ثبت، ویرایش، ارجاع، حذف و تکمیل نهایی فقط برای مدیر
+        Access::ensureCan('installation.manage');
 
         $refer = $request->input('action') === 'refer';
         $this->validatePayload($request, $refer);
@@ -142,8 +141,8 @@ class InstallationServiceController extends Controller
 
     public function update(Request $request, $id)
     {
-        if ($this->isInstaller())
-            return $this->apiController->respondForbidden();
+        // ثبت، ویرایش، ارجاع، حذف و تکمیل نهایی فقط برای مدیر
+        Access::ensureCan('installation.manage');
 
         $service = InstallationService::findOrFail($id);
 
@@ -194,16 +193,15 @@ class InstallationServiceController extends Controller
     {
         $service = InstallationService::with(self::RELATIONS)->findOrFail($id);
 
-        if ($this->isInstaller() && !$service->isAssignedTo(auth()->id()))
-            return $this->apiController->respondForbidden();
+        Access::ensureInstallation($service);
 
         return $this->apiController->respondData($this->present($service));
     }
 
     public function destroy($id)
     {
-        if ($this->isInstaller())
-            return $this->apiController->respondForbidden();
+        // ثبت، ویرایش، ارجاع، حذف و تکمیل نهایی فقط برای مدیر
+        Access::ensureCan('installation.manage');
 
         $service = InstallationService::findOrFail($id);
 
@@ -227,8 +225,8 @@ class InstallationServiceController extends Controller
     {
         $service = InstallationService::findOrFail($id);
 
-        if ($this->isInstaller() && !$service->isAssignedTo(auth()->id()))
-            return $this->apiController->respondForbidden();
+        // ثبت اقلام مصرفی فقط توسط نصاب ارجاع شده (یا مدیر)
+        Access::ensure(Access::can('installation.manage') || $service->isAssignedTo(auth()->id()));
 
         if (!in_array($service->stage, [InstallationService::STAGE_ASSIGNED, InstallationService::STAGE_NEEDS_FIX], true))
             return $this->apiController->respondError('این سرویس نصب در مرحله‌ی ثبت توسط نصاب نیست');
@@ -267,8 +265,8 @@ class InstallationServiceController extends Controller
     // مدیر پروژه‌ی تکمیل شده توسط نصاب را برای بررسی به کارشناس فنی می‌فرستد
     public function sendToReview(Request $request, $id)
     {
-        if ($this->isInstaller())
-            return $this->apiController->respondForbidden();
+        // ثبت، ویرایش، ارجاع، حذف و تکمیل نهایی فقط برای مدیر
+        Access::ensureCan('installation.manage');
 
         $service = InstallationService::findOrFail($id);
 
@@ -304,7 +302,7 @@ class InstallationServiceController extends Controller
         if ($service->stage !== InstallationService::STAGE_UNDER_REVIEW)
             return $this->apiController->respondError('این سرویس نصب در مرحله‌ی بررسی کارشناس فنی نیست');
 
-        if (!$this->isAdmin() && $service->technical_expert_id !== auth()->id())
+        if (!Access::can('installation.manage') && $service->technical_expert_id !== auth()->id())
             return $this->apiController->respondForbidden();
 
         $this->validate($request, [
@@ -331,8 +329,8 @@ class InstallationServiceController extends Controller
     // تکمیل نهایی پس از تایید کارشناس؛ ردیف خدمات پس از فروش این پروژه ایجاد می‌شود
     public function complete(Request $request, $id)
     {
-        if ($this->isInstaller())
-            return $this->apiController->respondForbidden();
+        // ثبت، ویرایش، ارجاع، حذف و تکمیل نهایی فقط برای مدیر
+        Access::ensureCan('installation.manage');
 
         $service = InstallationService::findOrFail($id);
 
@@ -383,7 +381,7 @@ class InstallationServiceController extends Controller
 
     public function finance($id)
     {
-        if (!$this->isAdmin())
+        if (!Access::can('profit.view'))
             return $this->apiController->respondForbidden();
 
         $service = InstallationService::with('customer')->findOrFail($id);
@@ -401,7 +399,7 @@ class InstallationServiceController extends Controller
     // ثبت هزینه یا دریافتی جانبی؛ می‌تواند یکی از خدمات تعریف شده در محصولات باشد یا عنوان آزاد
     public function storeFinanceItem(Request $request, $id)
     {
-        if (!$this->isAdmin())
+        if (!Access::can('profit.view'))
             return $this->apiController->respondForbidden();
 
         $service = InstallationService::findOrFail($id);
@@ -418,7 +416,7 @@ class InstallationServiceController extends Controller
 
     public function updateFinanceItem(Request $request, $id, $itemId)
     {
-        if (!$this->isAdmin())
+        if (!Access::can('profit.view'))
             return $this->apiController->respondForbidden();
 
         $item = InstallationServiceFinanceItem::where('installation_service_id', $id)->findOrFail($itemId);
@@ -429,7 +427,7 @@ class InstallationServiceController extends Controller
 
     public function destroyFinanceItem($id, $itemId)
     {
-        if (!$this->isAdmin())
+        if (!Access::can('profit.view'))
             return $this->apiController->respondForbidden();
 
         InstallationServiceFinanceItem::where('installation_service_id', $id)->findOrFail($itemId)->delete();
@@ -440,7 +438,7 @@ class InstallationServiceController extends Controller
     // ویرایش قیمت خرید واحد اقلام این پروژه (قیمت در همین پروژه ذخیره می‌شود و روی محصول اثری ندارد)
     public function updateItemPrices(Request $request, $id)
     {
-        if (!$this->isAdmin())
+        if (!Access::can('profit.view'))
             return $this->apiController->respondForbidden();
 
         $service = InstallationService::findOrFail($id);
@@ -526,11 +524,6 @@ class InstallationServiceController extends Controller
     private function isInstaller(): bool
     {
         return (int)auth()->user()->role === User::NASSAB;
-    }
-
-    private function isAdmin(): bool
-    {
-        return (int)auth()->user()->role === User::ADMIN;
     }
 
     private function messageWithWarnings(string $message, array $warnings): string
@@ -727,15 +720,15 @@ class InstallationServiceController extends Controller
     }
 
     /**
-     * اطلاعات مالی فقط برای مدیر: سود نهایی قابل مشاهده و قیمت خرید اقلام برای سایرین (مثل نصاب) مخفی می‌شود.
+     * اطلاعات مالی فقط با دسترسی «سود و زیان پروژه»: سود نهایی قابل مشاهده و قیمت خرید اقلام برای سایرین (مثل نصاب) مخفی می‌شود.
      */
     private function present($services)
     {
-        $admin = $this->isAdmin();
+        $canSeeProfit = Access::can('profit.view');
 
         collect($services instanceof InstallationService ? [$services] : $services)
-            ->each(function (InstallationService $service) use ($admin) {
-                if ($admin) {
+            ->each(function (InstallationService $service) use ($canSeeProfit) {
+                if ($canSeeProfit) {
                     $service->makeVisible('final_profit');
                     return;
                 }

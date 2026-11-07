@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -32,12 +33,14 @@ class ProductCategoryController extends Controller
 
     public function product(Request $request)
     {
+        Access::ensureCan('inventory.manage');
         $kalaId = $request->input('id');
         $comments = Product::withStats()->where('category_id', $kalaId)->orderBy('created_at', 'DESC')->get();
         return $this->apiController->respondData($comments);
     }
     public function store(Request $request)
     {
+        Access::ensureCan('inventory.manage');
 
         $this->validate($request, [
             'title' => 'required',
@@ -68,6 +71,7 @@ class ProductCategoryController extends Controller
 
     public function newProduct(Request $request)
     {
+        Access::ensureCan('inventory.manage');
 
         $this->validate($request, [
             'name' => 'required'
@@ -128,6 +132,7 @@ class ProductCategoryController extends Controller
         }
     }
     public function destroy(Request $request) {
+        Access::ensureCan('inventory.manage');
 
         $category = ProductCategory::findOrFail($request->id);
 
@@ -147,6 +152,7 @@ class ProductCategoryController extends Controller
     }
     public function deleteProduct(Request $request)
     {
+        Access::ensureCan('inventory.manage');
 
         $data = Product::findOrFail($request->input('id'));
         if ($data) {
@@ -162,6 +168,7 @@ class ProductCategoryController extends Controller
     }
     public function update(Request $request)
     {
+        Access::ensureCan('inventory.manage');
         $data = ProductCategory::findOrFail($request->input('id'));
 
         $this->validate($request, [

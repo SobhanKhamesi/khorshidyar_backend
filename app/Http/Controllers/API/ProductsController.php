@@ -7,6 +7,7 @@ use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\User;
+use App\Support\Access;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -32,6 +33,7 @@ class ProductsController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureSales();
 
         $this->validateProduct($request);
 
@@ -62,6 +64,7 @@ class ProductsController extends Controller
 
     public function update(Request $request)
     {
+        Access::ensureSales();
         $this->validateProduct($request);
 
         $data = Product::findOrFail($request->input('id'));
@@ -125,8 +128,8 @@ class ProductsController extends Controller
     public
     function destroy(Request $request)
     {
-        if (auth()->user()->role !== User::ADMIN && auth()->user()->role !== User::ANBARDAR)
-            return $this->apiController->respondForbidden('دسترسی ندارید.');
+        // حذف فقط برای مدیر (ثابت ANBARDAR وجود نداشت و برای غیر مدیر خطای سرور می‌داد)
+        Access::ensureCan('inventory.manage');
 
         $data = Product::findOrFail($request->input('id'));
         if ($data->delete()) {

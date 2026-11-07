@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\API;
 
+use App\Support\Access;
 use App\Http\Controllers\API\Contracts\ApiController;
 use App\Http\Controllers\API\Contracts\ApiHelper;
 use App\Http\Controllers\Controller;
@@ -34,6 +35,7 @@ class InventoryController extends Controller
 
     public function store(Request $request)
     {
+        Access::ensureCan('inventory.manage');
 
         $this->validate($request, [
             'title' => 'required',
@@ -58,6 +60,7 @@ class InventoryController extends Controller
 
     public function update(Request $request)
     {
+        Access::ensureCan('inventory.manage');
         $data = Inventory::findOrFail($request->input('id'));
 
         $this->validate($request, [
@@ -81,6 +84,7 @@ class InventoryController extends Controller
     }
 
     public function destroy(Request $request) {
+        Access::ensureCan('inventory.manage');
 
         $inventory = Inventory::findOrFail($request->id);
 
