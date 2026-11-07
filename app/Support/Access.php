@@ -187,7 +187,7 @@ class Access
 
     // ================= توقف درخواست =================
 
-    public static function deny(string $message = 'دسترسی به این بخش برای شما مجاز نیست'): never
+    public static function deny(string $message = 'دسترسی به این بخش برای شما مجاز نیست')
     {
         abort(403, $message);
     }
