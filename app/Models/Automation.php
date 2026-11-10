@@ -49,7 +49,8 @@ class Automation extends Model
         'failure_id' ,  // دلیل شکست
         'final_price' ,  // مبلغ نهایی
         'survey_type' ,  // نوع بازدید
-        'description' ,
+        'description' ,  // توضیحات درخواست
+        'invoice_description' ,  // توضیحات پیش فاکتور (زیر اقلام در پرینت)
         'gross_sale_amount' ,  // مبلغ فروش در لحظه‌ی فروش موفق
         'gross_purchase_cost' ,  // جمع قیمت خرید اقلام در لحظه‌ی فروش موفق
         'gross_profit' ,  // سود ناخالص اولیه (ثابت)

@@ -50,10 +50,10 @@ class Sms extends Model
 
     public function getJalaliCreatedAtAttribute()
     {
-        $createdDateTime = $this->attributes['created_at'];
-        $carbonDateTime = Carbon::parse($createdDateTime, 'UTC')->addHours(3)->addMinutes(30);
-        $jalaliDateTime = Jalalian::fromCarbon($carbonDateTime);
-        return $jalaliDateTime->format('Y/m/d ساعت H:i');
+        // created_at به وقت تهران (timezone برنامه) ذخیره می‌شود؛ نیازی به افزودن اختلاف ساعت نیست
+        if (!$this->created_at)
+            return null;
+        return Jalalian::fromCarbon($this->created_at)->format('Y/m/d ساعت H:i');
     }
 
 

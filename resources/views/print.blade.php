@@ -2,11 +2,11 @@
 <html lang="fa-IR">
 <head>
     <title>پرینت فاکتور</title>
-    <link rel="stylesheet" href="{{ asset("assets/css/bootstrap.css") }}">
+    <link rel="stylesheet" href="{{ config('webroot.assets') }}/css/bootstrap.css">
     <style>
         @font-face {
             font-family: IRANSans;
-            src: url("../assets/font/iransans/IRANSansWeb_Light.woff") format("woff");
+            src: url("{{ config('webroot.assets') }}/font/iransans/IRANSansWeb_Light.woff") format("woff");
             font-style: normal;
             font-weight: 300;
             font-display: swap;
@@ -14,7 +14,7 @@
 
         @font-face {
             font-family: IRANSans;
-            src: url("../assets/font/iransans/IRANSansWeb.woff") format("woff");
+            src: url("{{ config('webroot.assets') }}/font/iransans/IRANSansWeb.woff") format("woff");
             font-style: normal;
             font-weight: normal;
             font-display: swap;
@@ -22,7 +22,7 @@
 
         @font-face {
             font-family: IRANSans;
-            src: url("../assets/font/iransans/IRANSansWeb_Medium.woff") format("woff");
+            src: url("{{ config('webroot.assets') }}/font/iransans/IRANSansWeb_Medium.woff") format("woff");
             font-style: normal;
             font-weight: 500;
             font-display: swap;
@@ -39,6 +39,47 @@
             font-family: IRANSans, Tahoma, sans-serif !important;
         }
 
+        /* توضیحات قابل ویرایش؛ ارتفاع با اسکریپت پایین صفحه به اندازه متن تنظیم می‌شود */
+        textarea.auto-height {
+            display: block;
+            box-sizing: border-box;
+            width: 100%;
+            border: 1px dashed transparent;
+            border-radius: 0.4rem;
+            background: none;
+            color: #4d43ca;
+            font: inherit;
+            line-height: 1.7;
+            padding: 0.25rem;
+            resize: none;
+            overflow: hidden;
+            white-space: pre-wrap;
+        }
+
+        textarea.auto-height:hover, textarea.auto-height:focus {
+            border-color: #4d43ca;
+            outline: none;
+        }
+
+        .auto-height-print {
+            display: none;
+            color: #4d43ca;
+            line-height: 1.7;
+            padding: 0.25rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        @media print {
+            textarea.auto-height {
+                display: none;
+            }
+
+            .auto-height-print {
+                display: block;
+            }
+        }
+
     </style>
 
 
@@ -51,7 +92,7 @@
                 شرکت خورشیدیار
             </div>
             <div class="col">
-{{--                <img src="{{ asset("assets/picture/logo-ivaz.png") }}" alt="logo-ivaz" style="max-width: 7rem">--}}
+{{--                <img src="{{ config('webroot.assets') }}/picture/logo-ivaz.png" alt="logo-ivaz" style="max-width: 7rem">--}}
             </div>
         </div>
     </div>
@@ -115,8 +156,9 @@
                 $totalPrice = 0;
             @endphp
             @foreach ($accounting->orders as $item)
-                {{-- خدمات از جنس هزینه (مثل حمل و نقل) هزینه‌ی داخلی ما هستند و در فاکتور مشتری چاپ نمی‌شوند --}}
-                @continue($item->product->isCostService())
+                {{-- خدمات هزینه (مثل حمل و نقل) از مشتری دریافت می‌شوند و چاپ می‌شوند؛
+                     فقط ردیف‌های قدیمی که مبلغی از مشتری برایشان ثبت نشده (مبلغ صفر) چاپ نمی‌شوند --}}
+                @continue($item->product->isCostService() && (float)$item->price == 0)
                 <tr>
                     <td>{{ $i }}</td>
                     <td style="font-weight: bold">{{ $item->product->name }}</td>
@@ -141,6 +183,14 @@
                 </td>
             </tr>
         </table>
+        {{-- توضیحات پیش فاکتور زیر اقلام؛ فقط اگر ثبت شده باشد. قبل از پرینت همین‌جا قابل ویرایش است
+             (فقط برای همین پرینت و در دیتابیس ذخیره نمی‌شود) و ارتفاعش به اندازه متن است تا اسکرول نخورد --}}
+        @if(filled($accounting->invoice_description))
+            <textarea id="invoice-description" class="auto-height mt-2 mb-3" rows="1"
+                      title="قبل از پرینت می‌توانید متن را ویرایش کنید">{{ $accounting->invoice_description }}</textarea>
+            {{-- نسخه چاپی همان متن؛ ارتفاعش در صفحه چاپ خودکار است و چیزی بریده نمی‌شود --}}
+            <div class="auto-height-print mt-2 mb-3" aria-hidden="true">{{ $accounting->invoice_description }}</div>
+        @endif
         @if(count($accounting->payments) > 0)
             <div class="mt-5 mb-1">
                 پرداختی ها
@@ -222,16 +272,6 @@
     </div>
 
 
-    <div class="row my-5" style="color:#4d43ca">
-        <textarea  rows="10" cols="100" style="border: 0; background: none;white-space: break-spaces;color: #4d43ca">{{ $accounting->description ?? "در این نیروگاه دستگاه از سری هیبرید ۶ کیلو وات گرووات با ۲ سال گارانتی
-پنل های خورشیدی گرید A دارای ۱۵ سال گارانتی
-استراکچر نیروگاهی با تاییدیه ساتبا استفاده شده است
-سیم و کابل مصرفی به دلیل مشخص نبودن متراژ در این فاکتور لحاظ نشده است.
-تهیه ارت به عهده کارفرما میباشد
-در این پکیج تمامی تجهیزات و لوازم مورد نیاز (به جز سیم و کابل) از قبیل تابلو حفاظات ، تابلو چنج آور و بتون ، جرثقیل ، کارگر و ... در نظر گرفته شده است.
-" }}</textarea>
-    </div>
-
     <div class="row mt-5 pb-4">
         <div class="col"></div>
         <div class="col-auto">
@@ -240,5 +280,54 @@
     </div>
 
 
+<script>
+    // ارتفاع textarea به اندازه کل متن تا هیچ‌وقت اسکرول نخورد (هنگام تایپ، تغییر اندازه صفحه و قبل از پرینت)
+    (function () {
+        var areas = document.querySelectorAll('textarea.auto-height');
+
+        function fit(el) {
+            el.style.height = 'auto';
+            // scrollHeight + ضخامت border تا هیچ بخشی از متن پنهان نشود
+            el.style.height = (el.scrollHeight + el.offsetHeight - el.clientHeight) + 'px';
+        }
+
+        function fitAll() {
+            areas.forEach(fit);
+        }
+
+        areas.forEach(function (el) {
+            // متن ویرایش شده در نسخه چاپی هم قرار می‌گیرد
+            var mirror = el.nextElementSibling;
+            el.addEventListener('input', function () {
+                fit(el);
+                if (mirror && mirror.classList.contains('auto-height-print'))
+                    mirror.textContent = el.value;
+            });
+        });
+        window.addEventListener('resize', fitAll);
+        // هر بار که عرض کادر تغییر کند (مثلاً بارگذاری دیرتر css) ارتفاع دوباره محاسبه می‌شود
+        if (window.ResizeObserver) {
+            var lastWidths = new WeakMap();
+            var observer = new ResizeObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    var width = entry.contentRect.width;
+                    if (lastWidths.get(entry.target) !== width) {
+                        lastWidths.set(entry.target, width);
+                        setTimeout(function () {
+                            fit(entry.target);
+                        }, 0);
+                    }
+                });
+            });
+            areas.forEach(function (el) {
+                observer.observe(el);
+            });
+        }
+        window.addEventListener('load', fitAll);
+        if (document.fonts && document.fonts.ready)
+            document.fonts.ready.then(fitAll);
+        fitAll();
+    })();
+</script>
 </body>
 </html>

@@ -160,7 +160,10 @@ class AutomationContract extends Model
                 'phone' => $customer?->contact_number,
                 'address' => $customer?->address,
             ],
-            'items' => $automation->orders->map(fn($o) => [
+            // خدمت هزینه‌ی قدیمی که مبلغی از مشتری برایش ثبت نشده (مبلغ صفر) در جدول اقلام قرارداد نمی‌آید
+            'items' => $automation->orders
+                ->reject(fn($o) => $o->product?->isCostService() && (float)$o->price == 0)
+                ->map(fn($o) => [
                 'title' => $o->product?->name,
                 'count' => (float)$o->count,
                 'price' => (float)$o->price,

@@ -3,11 +3,11 @@
 <html lang="fa-IR">
 <head>
     <title>برگه نصب</title>
-    <link rel="stylesheet" href="{{ asset("assets/css/bootstrap.css") }}">
+    <link rel="stylesheet" href="{{ config('webroot.assets') }}/css/bootstrap.css">
     <style>
         @font-face {
             font-family: IRANSans;
-            src: url("../assets/font/iransans/IRANSansWeb_Light.woff") format("woff");
+            src: url("{{ config('webroot.assets') }}/font/iransans/IRANSansWeb_Light.woff") format("woff");
             font-style: normal;
             font-weight: 300;
             font-display: swap;
@@ -15,7 +15,7 @@
 
         @font-face {
             font-family: IRANSans;
-            src: url("../assets/font/iransans/IRANSansWeb.woff") format("woff");
+            src: url("{{ config('webroot.assets') }}/font/iransans/IRANSansWeb.woff") format("woff");
             font-style: normal;
             font-weight: normal;
             font-display: swap;
@@ -23,7 +23,7 @@
 
         @font-face {
             font-family: IRANSans;
-            src: url("../assets/font/iransans/IRANSansWeb_Medium.woff") format("woff");
+            src: url("{{ config('webroot.assets') }}/font/iransans/IRANSansWeb_Medium.woff") format("woff");
             font-style: normal;
             font-weight: 500;
             font-display: swap;
@@ -76,7 +76,7 @@
                 شرکت خورشیدیار
             </div>
             <div class="col">
-{{--                <img src="{{ asset("assets/picture/logo-ivaz.png") }}" alt="logo-ivaz" style="max-width: 7rem">--}}
+{{--                <img src="{{ config('webroot.assets') }}/picture/logo-ivaz.png" alt="logo-ivaz" style="max-width: 7rem">--}}
             </div>
         </div>
     </div>
@@ -257,7 +257,6 @@
                                 <button type="button" class="btn-remove-installer" onclick="removeInstallerRow(this)" title="حذف این نصاب از پرینت">✕</button>
                             </td>
                         </tr>
-                        @php $i++; @endphp
                     @endif
                 @endforeach
                 </tbody>

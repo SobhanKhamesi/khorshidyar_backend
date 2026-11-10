@@ -189,6 +189,7 @@ class AutomationController extends Controller
             'orders.*.orderPrice' => 'required|numeric|min:0',
             'orders.*.orderPurchasePrice' => 'nullable|numeric|min:0',
             'final_price' => 'required_with:orders|nullable|numeric|min:0',
+            'invoice_description' => 'nullable|string',
         ], self::PAYMENT_RULES), self::FINAL_PRICE_MESSAGES + [
             'final_price.required_with' => 'مبلغ نهایی را وارد نمایید',
         ]);
@@ -200,11 +201,17 @@ class AutomationController extends Controller
         $oldPrice = $automation->final_price;
         $invoiceChanged = $request->has('orders') || $request->filled('final_price');
         $paymentsChanged = $request->has('payments') || $request->has('cheques');
+        // توضیحات پیش فاکتور (زیر اقلام در پرینت)؛ فقط وقتی ارسال شود و با مقدار فعلی فرق کند
+        $descriptionChanged = $request->has('invoice_description')
+            && (string)$request->input('invoice_description') !== (string)$automation->invoice_description;
 
-        if (!$invoiceChanged && !$paymentsChanged)
+        if (!$invoiceChanged && !$paymentsChanged && !$descriptionChanged) {
+            if ($request->has('invoice_description'))
+                return $this->apiController->respondUpdated('تغییری ثبت نشد');
             return $this->apiController->respondError('تغییری برای ثبت ارسال نشده است');
+        }
 
-        DB::transaction(function () use ($request, $automation, $oldPrice, $invoiceChanged, $paymentsChanged) {
+        DB::transaction(function () use ($request, $automation, $oldPrice, $invoiceChanged, $paymentsChanged, $descriptionChanged) {
             if ($request->has('orders'))
                 $this->addOrder($request->input('orders') ?? [], $automation);
 
@@ -214,8 +221,12 @@ class AutomationController extends Controller
             if ($request->filled('final_price'))
                 $automation->update(['final_price' => $request->input('final_price')]);
 
+            if ($descriptionChanged)
+                $automation->update(['invoice_description' => $request->input('invoice_description')]);
+
             // قرارداد تایید شده‌ای که هنوز امضا نشده، با تغییر فاکتور نیاز به بازبینی و تایید مجدد دارد
-            $automation->contract?->invalidateApproval();
+            if ($invoiceChanged || $paymentsChanged)
+                $automation->contract?->invalidateApproval();
 
             $parts = [];
             if ($invoiceChanged)
@@ -223,6 +234,8 @@ class AutomationController extends Controller
                     . number_format((float)$automation->final_price) . ' تومان';
             if ($paymentsChanged)
                 $parts[] = 'پرداختی‌ها و چک‌ها ویرایش شد';
+            if ($descriptionChanged)
+                $parts[] = 'توضیحات پیش فاکتور ویرایش شد';
 
             AutomatonComment::create([
                 'automation_id' => $automation->id,
@@ -269,12 +282,14 @@ class AutomationController extends Controller
                 ? (int)round((float)$order['orderPurchasePrice'])
                 : ($product?->purchase_price !== null ? (int)$product->purchase_price : null);
 
-            // خدمت فقط یک مبلغ دارد: خدمت هزینه ← فقط مبلغ هزینه (قیمت خرید) و از مشتری دریافت نمی‌شود،
+            // خدمت فقط یک مبلغ دارد:
+            // خدمت هزینه (مثل حمل و نقل) ← همان مبلغ هم هزینه‌ی ما (قیمت خرید) است و هم از مشتری دریافت می‌شود (قیمت فروش)،
+            // پس در جمع فاکتور، پرینت و قرارداد مشتری می‌آید و سود این ردیف صفر است
             // خدمت دریافتی ← فقط مبلغ دریافتی (قیمت فروش) و برای ما هزینه‌ای ندارد
             if ($product?->isService()) {
                 if ($product->isCostService()) {
                     $purchasePrice = $purchasePrice ?: $price;
-                    $price = 0;
+                    $price = (int)$purchasePrice;
                 } else {
                     $purchasePrice = 0;
                 }
@@ -312,12 +327,13 @@ class AutomationController extends Controller
         $customer = Customer::findOrFail($request->input('customer'));
         Access::ensureCustomer($customer);
         $orders = $request->input('orders');
-        $description = $request->input('description');
+        // در ثبت سریع، توضیحات وارد شده متعلق به پیش فاکتور است
+        $invoiceDescription = $request->input('invoice_description', $request->input('description'));
         $referrerPercent = $this->resolveReferrerPercent($request, $customer);
 
         $finalPrice = $request->input('final_price');
 
-        $automation = DB::transaction(function () use ($customer, $orders, $description, $referrerPercent, $finalPrice) {
+        $automation = DB::transaction(function () use ($customer, $orders, $invoiceDescription, $referrerPercent, $finalPrice) {
             $invoice_number = Automation::nextInvoiceNumber();
 
             $automation = Automation::create([
@@ -325,7 +341,7 @@ class AutomationController extends Controller
                 'user_id' => auth()->id(),
                 'customer_id' => $customer->id,
                 'referrer_percent' => $referrerPercent,
-                'description' => $description,
+                'invoice_description' => $invoiceDescription,
             ]);
 
             if ($customer->status === Customer::LEAD)
@@ -362,12 +378,13 @@ class AutomationController extends Controller
         $automation = $this->findAutomation($automation->id, (int)$automation->status !== Automation::REQUEST);
         $nextStatus = $automation->status + 1;
         $orders = $request->input('orders');
-        $description = $request->input('description');
+        // توضیحات پیش فاکتور جدا از توضیحات درخواست ذخیره می‌شود و توضیحات درخواست دست نمی‌خورد
+        $invoiceDescription = $request->input('invoice_description');
         $referrerPercent = $this->resolveReferrerPercent($request, $automation->customer, $automation);
 
         $finalPrice = $request->input('final_price');
 
-        DB::transaction(function () use ($automation, $orders, $nextStatus, $description, $referrerPercent, $finalPrice) {
+        DB::transaction(function () use ($automation, $orders, $nextStatus, $invoiceDescription, $referrerPercent, $finalPrice) {
             $invoice_number = Automation::nextInvoiceNumber();
             $this->addOrder($orders, $automation);
 
@@ -375,7 +392,7 @@ class AutomationController extends Controller
                 'status' => $nextStatus,
                 'final_price' => $finalPrice,
                 'invoice_number' => $invoice_number,
-                'description' => $description,
+                'invoice_description' => $invoiceDescription,
                 'referrer_percent' => $referrerPercent,
             ]);
 
