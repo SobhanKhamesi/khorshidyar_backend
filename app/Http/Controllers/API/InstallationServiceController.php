@@ -83,7 +83,9 @@ class InstallationServiceController extends Controller
                 fn($q, $except) => $q->where('id', '!=', $except)
             ))
             ->orderByDesc('visit_date')
-            ->get();
+            ->get()
+            // نشانی پروژه‌ی قید شده در قرارداد، برای پر شدن خودکار آدرس نصب
+            ->each(fn(Automation $a) => $a->setAttribute('project_address', $a->projectAddress()));
 
         return $this->apiController->respondData($automations);
     }
@@ -618,15 +620,19 @@ class InstallationServiceController extends Controller
     private function extractServiceAttributes(Request $request): array
     {
         $purchaseSource = (int)$request->input('purchase_source');
+        $automationId = $purchaseSource === InstallationService::INTERNAL ? $request->input('automation_id') : null;
+
+        // اگر آدرس وارد نشده باشد، نشانی پروژه‌ی قرارداد همان فروش قرار می‌گیرد
+        $address = $request->input('address');
+        if (!filled($address) && $automationId)
+            $address = Automation::find($automationId)?->projectAddress();
 
         return [
             'customer_id' => $request->input('customer_id'),
             'purchase_source' => $purchaseSource,
             'installer_mode' => $this->installerMode($request),
-            'automation_id' => $purchaseSource === InstallationService::INTERNAL
-                ? $request->input('automation_id')
-                : null,
-            'address' => $request->input('address'),
+            'automation_id' => $automationId,
+            'address' => $address,
             'contact_number' => $request->input('contact_number'),
             'description' => $request->input('description'),
         ];

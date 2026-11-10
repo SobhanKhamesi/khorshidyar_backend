@@ -147,6 +147,24 @@ class Automation extends Model
         return $this->hasOne(AutomationIndustrialSurvey::class, 'automation_id');
     }
 
+    /**
+     * نشانی پروژه (محل نصب): اول نشانی قید شده در قرارداد (متن نهایی تایید/امضا شده، سپس پیش‌نویس)،
+     * در صورت نبود قرارداد، آدرس خود اتوماسیون یا آدرس فرم اولیه‌ی مشتری.
+     */
+    public function projectAddress(): ?string
+    {
+        $contract = $this->contract;
+        if ($contract) {
+            $address = $contract->snapshot['fields']['project_address'] ?? null;
+            if (!filled($address))
+                $address = $contract->resolvedFields()['project_address'] ?? null;
+            if (filled($address))
+                return $address;
+        }
+
+        return $this->address ?: ($this->customerSurvey?->address ?: null);
+    }
+
     public function getSabtKonandeAttribute()
     {
         return $this->user?->name;
