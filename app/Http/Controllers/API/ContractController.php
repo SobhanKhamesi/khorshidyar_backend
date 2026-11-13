@@ -93,6 +93,8 @@ class ContractController extends Controller
             ->all();
         // اقلام ماده ۳ (محصولات پیش فاکتور با مشخصات فنی + آیتم‌های دستی)
         $fields['tech_items'] = AutomationContract::sanitizeTechItems($request->input('fields.tech_items'));
+        // توضیحات هر قلم در جدول پیوست ۱
+        $fields['appendix_items'] = AutomationContract::sanitizeAppendixItems($request->input('fields.appendix_items'));
 
         $wasApproved = $contract->status === AutomationContract::APPROVED;
         $contract->update(['fields' => $fields]);

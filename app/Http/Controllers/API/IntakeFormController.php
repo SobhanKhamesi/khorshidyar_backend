@@ -199,9 +199,7 @@ class IntakeFormController extends Controller
     // فرم‌های تکمیل شده‌ای که هنوز در کارتابل دیده نشده‌اند (برای اعلان)
     public static function unseenSubmittedCount(): int
     {
-        // فرم‌های مشتریانی که کاربر به آن‌ها دسترسی دارد
-        return CustomerIntakeForm::whereNotNull('submitted_at')->whereNull('seen_at')
-            ->whereHas('customer', fn($q) => Access::scopeCustomers($q))->count();
+        return CustomerIntakeForm::pendingReview()->count();
     }
 
     // سوالات فرم «ثبت شده از مشتری» برای فرم ثبت/ویرایش درخواست در سامانه

@@ -342,6 +342,11 @@ class CustomersController extends Controller
     {
         Access::ensureCan('sales.delete');
         $data = Customer::findOrFail($request->input('id'));
+        Access::ensureCustomer($data);
+
+        if ($data->hasFinancialRecords()) {
+            return $this->apiController->respondValidationError('برای این مشتری فاکتور یا چک حسابداری ثبت شده است و قابل حذف نیست');
+        }
 
         if ($data->deleteWithRelations()) {
             return $this->apiController->respondDeleted();

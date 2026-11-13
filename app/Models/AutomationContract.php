@@ -73,6 +73,9 @@ class AutomationContract extends Model
     // ستون‌های هر ردیف «ماده ۳ - مشخصات فنی و اقلام»
     const TECH_ITEM_KEYS = ['product_id', 'title', 'count', 'spec', 'brand', 'warranty'];
 
+    // ستون‌های هر ردیف «پیوست ۱ - جدول اقلام»: نام محصول و توضیحاتی که در صفحه قرارداد وارد می‌شود
+    const APPENDIX_ITEM_KEYS = ['product_id', 'title', 'description'];
+
     public static function defaultFields(Automation $automation): array
     {
         $fields = array_fill_keys(array_keys(self::fieldLabels()), null);
@@ -80,6 +83,7 @@ class AutomationContract extends Model
         $fields['contract_date'] = (new Verta())->format('Y/m/d');
         $fields['project_address'] = $automation->customerSurvey?->address ?: $automation->customer?->address;
         $fields['tech_items'] = [];
+        $fields['appendix_items'] = [];
 
         return $fields;
     }
@@ -92,11 +96,47 @@ class AutomationContract extends Model
     public function resolvedFields(): array
     {
         $saved = $this->fields ?? [];
-        $values = array_filter(\Illuminate\Support\Arr::except($saved, ['tech_items']), fn($v) => $v !== null && $v !== '');
+        $values = array_filter(\Illuminate\Support\Arr::except($saved, ['tech_items', 'appendix_items']), fn($v) => $v !== null && $v !== '');
         $fields = array_merge(self::defaultFields($this->automation), $values);
         $fields['tech_items'] = $this->syncTechItems($saved['tech_items'] ?? []);
+        $fields['appendix_items'] = $this->syncAppendixItems($saved['appendix_items'] ?? []);
 
         return $fields;
+    }
+
+    // اقلام فاکتور که در جدول پیوست ۱ می‌آیند (خدمت هزینه‌ی قدیمی با مبلغ صفر نمی‌آید)
+    private function invoiceOrders()
+    {
+        return $this->automation->orders()->with('product')->get()
+            ->reject(fn($o) => $o->product?->isCostService() && (float)$o->price == 0)
+            ->values();
+    }
+
+    /**
+     * ردیف‌های پیوست ۱ همیشه با اقلام فاکتور هم‌گام است؛ توضیحات وارد شده برای هر محصول حفظ می‌شود.
+     */
+    private function syncAppendixItems(array $savedItems): array
+    {
+        $savedByProduct = collect($savedItems)->filter(fn($i) => is_array($i) && !empty($i['product_id']))->keyBy('product_id');
+
+        return $this->invoiceOrders()->map(fn($order) => [
+            'product_id' => $order->product_id,
+            'title' => $order->product?->name,
+            'description' => $savedByProduct->get($order->product_id)['description'] ?? null,
+        ])->all();
+    }
+
+    // پاک‌سازی ردیف‌های ارسالی پیوست ۱؛ فقط توضیحات هر محصول ذخیره می‌شود
+    public static function sanitizeAppendixItems($items): array
+    {
+        return collect(is_array($items) ? $items : [])
+            ->filter(fn($i) => is_array($i) && !empty($i['product_id']))
+            ->map(fn($i) => [
+                'product_id' => $i['product_id'],
+                'description' => is_string($i['description'] ?? null) ? trim($i['description']) : null,
+            ])
+            ->values()
+            ->all();
     }
 
     private function syncTechItems(array $savedItems): array
@@ -151,24 +191,22 @@ class AutomationContract extends Model
         $prepayment = (float)$automation->payments->sum('amount');
         $jalali = fn($date) => $date ? (new Verta($date))->format('Y/m/d') : null;
 
+        $fields = $this->resolvedFields();
+
         return [
             'template_version' => 1,
-            'fields' => $this->resolvedFields(),
+            'fields' => $fields,
             'employer' => [
                 'name' => $customer?->fullName,
                 'national_code' => $customer?->national_code,
                 'phone' => $customer?->contact_number,
                 'address' => $customer?->address,
             ],
-            // خدمت هزینه‌ی قدیمی که مبلغی از مشتری برایش ثبت نشده (مبلغ صفر) در جدول اقلام قرارداد نمی‌آید
-            'items' => $automation->orders
-                ->reject(fn($o) => $o->product?->isCostService() && (float)$o->price == 0)
-                ->map(fn($o) => [
-                'title' => $o->product?->name,
-                'count' => (float)$o->count,
-                'price' => (float)$o->price,
-                'total' => (float)$o->count * (float)$o->price,
-            ])->values()->all(),
+            // جدول پیوست ۱: فقط نام محصول و توضیحات؛ مبلغ نهایی فاکتور پایین جدول می‌آید
+            'items' => collect($fields['appendix_items'])->map(fn($i) => [
+                'title' => $i['title'],
+                'description' => $i['description'],
+            ])->all(),
             'total' => $total,
             'total_words' => PersianNumber::toWords($total) . ' تومان',
             'prepayment' => $prepayment,

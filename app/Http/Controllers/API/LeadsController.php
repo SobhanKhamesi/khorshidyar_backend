@@ -347,9 +347,9 @@ class LeadsController extends Controller
         }
 
         $attributes = [
+            // status عمداً اینجا ست نمی‌شود: همین متد برای ویرایش سرنخ و فرصت
+            // (که ماهیت یکسانی دارند) استفاده می‌شود و ویرایش نباید مرحله رکورد را تغییر دهد.
             'type' => $leadType,
-            'status' => Customer::LEAD,
-
 
             'name' => $this->apiHelper->getRealText($request, 'name'),
             'city' => $this->apiHelper->getRealText($request, 'city'),
@@ -412,6 +412,11 @@ class LeadsController extends Controller
     {
         Access::ensureCan('sales.delete');
         $data = Customer::findOrFail($request->input('id'));
+        Access::ensureCustomer($data);
+
+        if ($data->hasFinancialRecords()) {
+            return $this->apiController->respondValidationError('برای این مورد فاکتور یا چک حسابداری ثبت شده است و قابل حذف نیست');
+        }
 
         if ($data->deleteWithRelations()) {
             return $this->apiController->respondDeleted();

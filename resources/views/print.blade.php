@@ -86,7 +86,9 @@
 </head>
 <body dir="rtl">
 <div class="mx-auto mt-3 pb-4" style="max-width: 1000px">
-    <div class="card-header" style="border: 1px solid blue;border-radius: 0.7rem">
+    @include('partials.print_tools')
+
+    <div class="card-header print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
         <div class="row text-center" style="align-items: center;">
             <div class="col text-center" id="title">
                 شرکت خورشیدیار
@@ -96,7 +98,7 @@
             </div>
         </div>
     </div>
-    <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+    <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
         <div class="row" style="align-items: center;">
             <div class="col-auto">
                 <div>
@@ -118,7 +120,7 @@
             </div>
         </div>
     </div>
-    <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+    <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
         <div class="row" style="align-items: center;">
             <div class="col-auto">
                 {{ $accounting->status === \App\Models\Automation::SUCCESS ? "فاکتور فروش" : "پیش فاکتور" }}
@@ -139,7 +141,7 @@
     </div>
 
 
-    <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+    <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
         <table class="table table-bordered">
             <tr>
                 <th class="text-center">#</th>
@@ -192,7 +194,8 @@
             <div class="auto-height-print mt-2 mb-3" aria-hidden="true">{{ $accounting->invoice_description }}</div>
         @endif
         @if(count($accounting->payments) > 0)
-            <div class="mt-5 mb-1">
+            <div class="print-tile print-subtile mt-5">
+            <div class="mb-1">
                 پرداختی ها
             </div>
             <table class="table table-bordered table-responsive-sm">
@@ -228,9 +231,11 @@
                     </td>
                 </tr>
             </table>
+            </div>
         @endif
         @if(count($accounting->cheques) > 0)
-            <div class="mt-3 mb-1">
+            <div class="print-tile print-subtile mt-3">
+            <div class="mb-1">
                 چک ها
             </div>
             <table class="table table-bordered table-responsive-sm">
@@ -268,11 +273,12 @@
                     </td>
                 </tr>
             </table>
+            </div>
         @endif
     </div>
 
 
-    <div class="row mt-5 pb-4">
+    <div class="row mt-5 pb-4 print-tile">
         <div class="col"></div>
         <div class="col-auto">
             <span style="margin-right: auto">مهر و امضای مشتری</span>

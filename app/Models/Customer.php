@@ -244,6 +244,16 @@ class Customer extends Model
     /**
      * حذف مشتری/سرنخ به همراه داده‌های وابسته، به‌صورت اتمیک و با کوئری‌های گروهی.
      */
+    /**
+     * فاکتور و چک حسابداری با حذف مشتری حذف نمی‌شوند (کلید خارجی restrict)،
+     * پس قبل از حذف باید چک شود تا به جای خطای دیتابیس، پیام مناسب برگردد.
+     */
+    public function hasFinancialRecords(): bool
+    {
+        return Accounting::where('customer_id', $this->id)->exists()
+            || Check::where('customer_id', $this->id)->exists();
+    }
+
     public function deleteWithRelations(): bool
     {
         return DB::transaction(function () {

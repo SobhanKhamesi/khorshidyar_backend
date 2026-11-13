@@ -83,9 +83,9 @@ class SystemReminders
 
     private static function intakeForms(): array
     {
+        // یادآوری فرمی که دیگر در لیست درخواست ها نیست، در sync خودکار «تکمیل شده» می‌شود
         return CustomerIntakeForm::with('customer')
-            ->whereNotNull('submitted_at')->whereNull('seen_at')
-            ->whereHas('customer', fn($q) => Access::scopeCustomers($q))
+            ->pendingReview()
             ->get()
             ->mapWithKeys(fn(CustomerIntakeForm $form) => [$form->id => [
                 'title' => 'فرم اولیه توسط ' . self::customerKind($form->customer) . ' «' . ($form->customer?->name ?? '-') . '» تکمیل شد',

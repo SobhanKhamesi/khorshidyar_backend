@@ -17,7 +17,8 @@ use Illuminate\Support\Facades\DB;
  *
  * سود نهایی = مبلغ فروش (مبلغ نهایی فاکتور؛ فقط خرید از ما)
  *           + دریافتی‌های جانبی (خدمات ارائه شده)
- *           − هزینه‌ی واقعی اقلام مصرف شده (مقدار مصرف × قیمت خرید واحد)
+ *           − قیمت خرید کالاهای فاکتور فروش (تعداد × قیمت خرید؛ فقط خرید از ما)
+ *           − هزینه‌ی واقعی اقلام مصرفی نصب (مقدار مصرف × قیمت خرید واحد؛ جدا از کالاهای فاکتور، مثل باتری و سیم)
  *           − دستمزدها (دریافتی افراد از پروژه در پروفایل)
  *           − هزینه‌های جانبی
  *           − سهم معرف (فقط خرید از ما)
@@ -103,7 +104,10 @@ class ProjectProfitService
             'description' => $e->description,
         ])->values();
 
+        $invoiceGoods = $automation ? self::invoiceGoods($automation->id) : collect();
+
         $saleAmount = $automation ? (int)$automation->final_price : 0;
+        $invoiceCost = (int)$invoiceGoods->sum('total');
         $incomeTotal = (int)$incomes->sum('amount');
         $itemsCost = (int)$items->sum('total');
         $wagesTotal = (int)$wages->sum('amount');
@@ -112,7 +116,7 @@ class ProjectProfitService
         $referrerAmount = $automation && $referrerPercent ? (int)round($saleAmount * $referrerPercent / 100) : 0;
 
         $revenue = $saleAmount + $incomeTotal;
-        $afterItems = $revenue - $itemsCost;
+        $afterItems = $revenue - $invoiceCost - $itemsCost;
 
         return [
             'is_internal' => (bool)$automation,
@@ -124,6 +128,8 @@ class ProjectProfitService
                 'invoice_number' => $automation->invoice_number,
             ] : null,
             'sale_amount' => $saleAmount,
+            'invoice_goods' => $invoiceGoods,
+            'invoice_cost' => $invoiceCost,
             'incomes' => $incomes,
             'income_total' => $incomeTotal,
             'revenue_total' => $revenue,
@@ -139,6 +145,27 @@ class ProjectProfitService
             'referrer_amount' => $referrerAmount,
             'final_profit' => $afterItems - $wagesTotal - $costsTotal - $referrerAmount,
         ];
+    }
+
+    /**
+     * کالاهای فاکتور فروش (نه خدمات) با قیمت خرید ثبت شده در فاکتور.
+     * خدمات هزینه‌دار فاکتور جداگانه به هزینه‌های جانبی منتقل می‌شوند (importInvoiceServices) و اینجا حساب نمی‌شوند.
+     */
+    private static function invoiceGoods($automationId): Collection
+    {
+        return DB::table('orders')
+            ->join('products', 'products.id', '=', 'orders.product_id')
+            ->where('orders.automation_id', $automationId)
+            ->where(fn($q) => $q->whereNull('products.kind')->orWhere('products.kind', '!=', Product::KIND_SERVICE))
+            ->get(['orders.id', 'orders.product_id', 'orders.count', 'orders.purchase_price', 'products.name'])
+            ->map(fn($order) => [
+                'id' => $order->id,
+                'product_id' => $order->product_id,
+                'product_name' => $order->name,
+                'quantity' => (float)$order->count,
+                'unit_purchase_price' => (int)$order->purchase_price,
+                'total' => (int)round((float)$order->count * (int)$order->purchase_price),
+            ])->values();
     }
 
     // ================= قیمت خرید اقلام =================
@@ -172,7 +199,8 @@ class ProjectProfitService
 
     /**
      * خدماتی از فاکتور فروش که برای ما هزینه دارند (قیمت خرید > 0، مثل حمل و نقل) به‌عنوان هزینه‌ی جانبی پروژه منتقل می‌شوند.
-     * کالاهای فاکتور به‌عنوان اقلام پیش‌نیاز در فرم ارجاع پیشنهاد می‌شوند. مبلغ فروش همه‌ی اقلام در مبلغ نهایی فاکتور است.
+     * قیمت خرید کالاهای فاکتور مستقیماً در سود و زیان کم می‌شود (invoiceGoods)؛ اقلام مصرفی نصب از آن‌ها جداست.
+     * مبلغ فروش همه‌ی اقلام در مبلغ نهایی فاکتور است.
      */
     public static function importInvoiceServices(InstallationService $service): void
     {

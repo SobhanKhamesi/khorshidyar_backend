@@ -48,6 +48,12 @@ class Permissions
                     'type' => 'action',
                     'requires' => 'sales.access',
                 ],
+                'sales.print' => [
+                    'label' => 'پرینت پیش فاکتور / فاکتور فروش',
+                    'description' => 'نمایش دکمه‌ی پرینت در اتوماسیون فروش، مشتری، سرنخ و فرصت و پرینت گرفتن از فاکتور',
+                    'type' => 'action',
+                    'requires' => 'sales.access',
+                ],
                 'sales.delete' => [
                     'label' => 'حذف داده‌های فروش',
                     'description' => 'حذف سرنخ، مشتری، تماس، معرف و یادداشت‌های اتوماسیون',
@@ -80,6 +86,11 @@ class Permissions
                     'label' => 'مشاهده‌ی همه‌ی سرویس‌های نصب',
                     'description' => 'همه‌ی سرویس‌های نصب، از جمله پیش‌نویس‌ها',
                     'type' => 'view',
+                ],
+                'installation.print' => [
+                    'label' => 'پرینت برگه‌ی نصب',
+                    'description' => 'نمایش دکمه‌ی پرینت سرویس نصب در لیست سرویس‌ها و سوابق مشتری و پرینت گرفتن از برگه‌ی نصب',
+                    'type' => 'action',
                 ],
                 'installation.manage' => [
                     'label' => 'مدیریت سرویس نصب',
@@ -178,10 +189,10 @@ class Permissions
 
     // قوانین قبلی سامانه (پیش از امکان ویرایش)
     const DEFAULTS = [
-        User::KARSHENAS_FANI => ['sales.access', 'installation.view_assigned', 'after_sales.view_assigned'],
+        User::KARSHENAS_FANI => ['sales.access', 'sales.print', 'installation.view_assigned', 'installation.print', 'after_sales.view_assigned'],
         User::NASSAB => ['installation.view_assigned', 'after_sales.view_assigned'],
-        User::KARSHENAS_FOROSH => ['sales.access'],
-        User::MODIR_FOROSH => ['sales.access', 'sales.view_all', 'sales.manage_stages'],
+        User::KARSHENAS_FOROSH => ['sales.access', 'sales.print'],
+        User::MODIR_FOROSH => ['sales.access', 'sales.view_all', 'sales.manage_stages', 'sales.print'],
     ];
 
     /** @var array<int, string[]>|null دسترسی‌های همه‌ی نقش‌ها در همین درخواست */

@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use App\Support\Access;
 use Hekmatinasser\Verta\Verta;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
@@ -88,6 +90,23 @@ class CustomerIntakeForm extends Model
     public function sender()
     {
         return $this->belongsTo(User::class, 'sent_by');
+    }
+
+    /**
+     * فرم‌های تکمیل شده‌ای که هنوز منتظر بررسی در کارتابل «لیست درخواست ها» هستند (برای زنگوله و یادآوری).
+     * فقط وقتی معتبر است که ردیف آن واقعاً در لیست درخواست ها دیده شود، یعنی:
+     *  - درخواست هنوز وجود دارد و در مرحله «درخواست» است (اگر بدون باز کردن فرم به پیش فاکتور رفته،
+     *    شکست خورده یا حذف شده باشد، دیگر ردیفی در لیست نیست و اعلان هم نباید بماند)
+     *  - کاربر به آن درخواست دسترسی دارد (همان محدوده لیست درخواست ها)
+     *  - آخرین فرم ارسالی آن درخواست است (فرم قدیمی‌تری که با ارسال لینک جدید جایگزین شده، در لیست نمایش داده نمی‌شود)
+     */
+    public function scopePendingReview(Builder $query): Builder
+    {
+        return $query->whereNotNull('submitted_at')->whereNull('seen_at')
+            ->whereHas('automation', fn($q) => Access::scopeAutomations($q->where('status', Automation::REQUEST)))
+            ->whereNotExists(fn($q) => $q->selectRaw('1')->from('customer_intake_forms as newer')
+                ->whereColumn('newer.automation_id', 'customer_intake_forms.automation_id')
+                ->whereColumn('newer.created_at', '>', 'customer_intake_forms.created_at'));
     }
 
     public function getIsSubmittedAttribute(): bool

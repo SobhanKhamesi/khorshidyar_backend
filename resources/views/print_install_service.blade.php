@@ -57,20 +57,15 @@
             color: #fff;
         }
 
-        /* هیچ‌کدام از دکمه‌های حذف در خروجی پرینت نمایش داده نمی‌شوند */
-        @media print {
-            .no-print {
-                display: none !important;
-            }
-        }
-
     </style>
 
 
 </head>
 <body dir="rtl">
 <div class="mx-auto mt-3 pb-4" style="max-width: 1000px">
-    <div class="card-header" style="border: 1px solid blue;border-radius: 0.7rem">
+    @include('partials.print_tools')
+
+    <div class="card-header print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
         <div class="row text-center" style="align-items: center;">
             <div class="col text-center" id="title">
                 شرکت خورشیدیار
@@ -81,7 +76,7 @@
         </div>
     </div>
 
-    <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+    <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
         <div class="row" style="align-items: center;">
             <div class="col-auto">
                 <div>
@@ -104,7 +99,7 @@
         </div>
     </div>
 
-    <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+    <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
         <div class="row" style="align-items: center;">
             <div class="col-auto">
                 برگه نصب
@@ -121,7 +116,7 @@
         </div>
     </div>
 
-    <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+    <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
         <div class="row" style="align-items: center;">
             <div class="col-auto">
                 <span>منبع خرید : </span>
@@ -165,7 +160,7 @@
 
     @foreach(['اقلام پیش‌نیاز' => $installationService->requiredItems, 'اقلام مصرف شده (ثبت شده توسط نصاب)' => $installationService->usedItems] as $itemsTitle => $items)
         @if(count($items) > 0)
-            <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+            <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
                 <div class="mb-2" style="font-weight: bold">{{ $itemsTitle }}</div>
                 <table class="table table-bordered">
                     <tr>
@@ -187,7 +182,7 @@
         @endif
     @endforeach
     @if($installationService->automation)
-        <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+        <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
             <div class="mb-2" style="font-weight: bold">اطلاعات فاکتور فروش {{ $installationService->automation->invoice_number ?? " : " .$installationService->automation->invoice_number }}</div>
             <table class="table table-bordered">
                 <tr>
@@ -231,7 +226,7 @@
     @endif
 
     @if($installerRows->contains(fn($row) => $row['appointment'] !== null))
-        <div class="card-header mt-2" style="border: 1px solid blue;border-radius: 0.7rem">
+        <div class="card-header mt-2 print-tile" style="border: 1px solid blue;border-radius: 0.7rem">
             <div>
                 تایم های نصب
             </div>
@@ -282,8 +277,11 @@
         });
 
         // اگر همه‌ی نصاب‌ها حذف شدند، کل باکس «تایم های نصب» را هم مخفی کن
-        if (remainingRows.length === 0) {
-            table.closest('.card-header').style.display = 'none';
+        // (ردیف عنوان هم داخل tbody ضمنی مرورگر است؛ فقط ردیف‌های نصاب شمرده می‌شوند)
+        if (table.querySelectorAll('.btn-remove-installer').length === 0) {
+            var tile = table.closest('.print-tile');
+            tile.classList.add('tile-empty');
+            tile.style.display = 'none';
         }
     }
 </script>
